@@ -1,0 +1,36 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-discord'
+    libraryName = 'Discord'
+    description = 'A Discord bot resource, modular text/slash commands, and message actions, backed by JDA.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.discord.nodes']
+}
+
+dependencies {
+    implementation('net.dv8tion:JDA:5.2.1') {
+        exclude module: 'opus-java' // no voice — drop the native audio dependency
+        // JDA depends on slf4j-api itself. Left alone, that transitive dependency ends up
+        // bundled in the shaded jar too — which is exactly what the host's install-time
+        // validation rejects a jar for, because a bundled slf4j-api means a second, separately
+        // initialised SLF4J binding with no sinks attached, silently swallowing every log line
+        // this library (and JDA inside it) produces. housegraph-api already supplies slf4j-api
+        // compileOnly, and the host provides the real one at runtime, so this library never
+        // needs its own copy.
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+}
+
+shadowJar {
+    // Not relocated, deliberately, unlike the template's default advice. Relocation exists to
+    // stop two installed libraries bundling different versions of the same dependency from
+    // fighting over one shared class loader. Today housegraph-discord is the only library in
+    // this repository (or known to exist anywhere) that bundles JDA, so there is nothing to
+    // collide with — and JDA is large enough, and reflective enough internally (event listener
+    // dispatch, annotation scanning), that relocating it blind adds real risk for a benefit that
+    // doesn't exist yet. Revisit this if a second JDA-bundling library ever gets installed
+    // alongside this one.
+    mergeServiceFiles()
+}
