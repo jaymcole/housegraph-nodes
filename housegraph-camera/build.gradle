@@ -1,0 +1,14 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-camera'
+    libraryName = 'Camera'
+    description = 'ONVIF WS-Discovery + Reolink HTTP CGI: camera discovery, snapshot, and motion status.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.camera.nodes']
+}
+
+// No third-party dependencies. Discovery is ONVIF WS-Discovery (UDP multicast) plus a TCP
+// port-scan fallback, both plain JDK sockets; Reolink and ONVIF are both plain HTTP/SOAP over
+// java.net.http.HttpClient. org.json comes from housegraph-api (api, compileOnly here).

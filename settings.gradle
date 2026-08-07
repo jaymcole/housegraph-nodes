@@ -4,3 +4,4 @@ rootProject.name = 'housegraph-nodes'
 // view — its own id, its own manifest, its own jar — they just share a build and a release.
 include 'housegraph-iot'
 include 'housegraph-discord'
+include 'housegraph-camera'
