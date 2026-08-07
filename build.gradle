@@ -1,0 +1,17 @@
+// The root project builds nothing. Each subproject is a node library; the shared build logic
+// lives in buildSrc as the `housegraph-node-library` convention plugin.
+//
+// Versioning is lockstep: one tag releases every library at the same version. That is the trade
+// this layout makes — releasing one library bumps the others' version numbers — in exchange for an
+// API bump being a single commit and a single release rather than one per repository.
+subprojects {
+    group = 'io.github.jaymcole.housegraph.plugins'
+    // The release workflow passes the tag as -Pversion=<tag without v>; this is the local default.
+    version = rootProject.version.toString() == 'unspecified' ? '0.1.0' : rootProject.version.toString()
+}
+
+/** Convenience: every library's installable jar, for the release workflow to attach. */
+tasks.register('shadedJars') {
+    description = 'Builds the shaded jar of every node library in this repository.'
+    dependsOn subprojects.collect { "${it.path}:shadowJar" }
+}

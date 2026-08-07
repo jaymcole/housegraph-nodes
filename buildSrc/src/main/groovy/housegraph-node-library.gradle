@@ -1,0 +1,140 @@
+/**
+ * Everything a HouseGraph node library needs, written once.
+ *
+ * This is the reason these libraries share a repository: the rules below are easy to get subtly
+ * wrong, and the failure modes are silent (a node that never appears, logging that vanishes, two
+ * libraries fighting over a dependency). Getting them right once beats copying them per library
+ * and watching the copies drift.
+ *
+ * A subproject applies this and declares only its identity:
+ *
+ *     plugins { id 'housegraph-node-library' }
+ *     nodeLibrary {
+ *         id = 'housegraph-iot'
+ *         description = '...'
+ *         nodePackages = ['io.github.jaymcole.housegraph.plugins.iot.nodes']
+ *     }
+ */
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow'
+    id 'org.openjfx.javafxplugin'
+}
+
+def nodeLibrary = extensions.create('nodeLibrary', NodeLibraryExtension)
+nodeLibrary.libraryName.convention(nodeLibrary.id)
+nodeLibrary.description.convention('')
+nodeLibrary.categoryPrefix.convention(nodeLibrary.id.map { it.replaceFirst('^housegraph-', '') })
+
+def houseGraphApi = providers.gradleProperty('houseGraphApi').get()
+def houseGraphApiVersion = providers.gradleProperty('houseGraphApiVersion').get()
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://jitpack.io' }
+}
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+// compileOnly, not the plugin's default `implementation`. A node returns a javafx.scene.Node for
+// its inline UI so JavaFX is needed to compile, but the host supplies it at runtime — and anything
+// on `implementation` is bundled into the shaded jar, which would mean shipping a copy of JavaFX.
+//
+// The plugin itself is required (not just coordinates) because HouseGraph's published metadata
+// names JavaFX without a platform classifier on purpose, so the unclassified artifacts are stubs.
+javafx {
+    version = providers.gradleProperty('javafxVersion').get()
+    modules = ['javafx.controls']
+    configuration = 'compileOnly'
+}
+
+dependencies {
+    // compileOnly is REQUIRED. The host supplies housegraph-api and its transitive org.json and
+    // slf4j-api from the parent class loader. Bundling the api gives this library its own BaseNode,
+    // so every node in it fails the host's isAssignableFrom check during discovery and never
+    // appears, with nothing in the log to say why. Bundling slf4j-api gives a second logging
+    // binding with no outputs attached, so all of this library's logging silently vanishes.
+    // HouseGraph's installer rejects a jar containing either.
+    compileOnly houseGraphApi
+    testImplementation houseGraphApi
+
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+javadoc {
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
+}
+
+// --- The generated manifest ---------------------------------------------------------------------
+// Generated, never committed, so a library's declared version can't drift from the tag it was
+// released under.
+
+def manifestDir = layout.buildDirectory.dir('generated/plugin-manifest')
+
+def pluginManifest = tasks.register('pluginManifest') {
+    outputs.dir(manifestDir)
+    // Re-run when the identity changes, not only when the output is missing.
+    inputs.property('id', nodeLibrary.id)
+    inputs.property('libraryName', nodeLibrary.libraryName)
+    inputs.property('description', nodeLibrary.description)
+    inputs.property('nodePackages', nodeLibrary.nodePackages)
+    inputs.property('categoryPrefix', nodeLibrary.categoryPrefix)
+    inputs.property('version', providers.provider { project.version.toString() })
+    inputs.property('apiVersion', houseGraphApiVersion)
+
+    def outDir = manifestDir
+    def id = nodeLibrary.id
+    def libraryName = nodeLibrary.libraryName
+    def description = nodeLibrary.description
+    def nodePackages = nodeLibrary.nodePackages
+    def categoryPrefix = nodeLibrary.categoryPrefix
+    def versionProvider = providers.provider { project.version.toString() }
+    // Every library in this repository is released from one tag, so they share a repository URL.
+    def repository = 'https://github.com/jaymcole/housegraph-nodes'
+
+    doLast {
+        def dir = new File(outDir.get().asFile, 'META-INF')
+        dir.mkdirs()
+        new File(dir, 'housegraph-plugin.json').text = groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson([
+                        manifestVersion: 1,
+                        id             : id.get(),
+                        name           : libraryName.get(),
+                        version        : versionProvider.get(),
+                        apiVersion     : houseGraphApiVersion,
+                        repository     : repository,
+                        description    : description.get(),
+                        nodePackages   : nodePackages.get(),
+                        categoryPrefix : categoryPrefix.get()
+                ]))
+    }
+}
+sourceSets.main.output.dir(manifestDir, builtBy: pluginManifest)
+
+// --- The shaded jar ------------------------------------------------------------------------------
+
+shadowJar {
+    // Load-bearing, not cosmetic. This repository publishes several libraries in one release, and
+    // HouseGraph matches a library to its own jar by the name <pluginId>-<version>-all.jar. Get
+    // this wrong and installing one library silently installs a different one.
+    archiveBaseName = nodeLibrary.id
+
+    // REQUIRED for any bundled dependency that uses ServiceLoader (DJL's engine discovery, JDBC
+    // drivers). Without it those service files collide and the library fails at runtime with a
+    // confusing "no provider found".
+    mergeServiceFiles()
+
+    // Relocate everything bundled: all installed libraries share ONE class loader, so two of them
+    // bundling different versions of the same dependency would fight. Each library adds its own
+    // relocate lines for what it bundles.
+}
+
+build.dependsOn shadowJar

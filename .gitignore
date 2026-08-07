@@ -1,0 +1,18 @@
+.gradle/
+build/
+buildSrc/build/
+out/
+
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Device firmware credentials. squirrel_status/wifi_secrets.h holds a real SSID and password;
+# only the .example is committed. Do not remove this line.
+wifi_secrets.h
+
+.DS_Store
+Thumbs.db
+*.class
+hs_err_pid*

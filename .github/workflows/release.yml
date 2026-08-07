@@ -1,0 +1,37 @@
+name: Release
+
+# Pushing a tag releases every library in this repository at that version. Lockstep is the trade
+# this layout makes: releasing one library bumps the others' version numbers, in exchange for an
+# API bump being one commit and one release rather than one per repository.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - run: chmod +x ./gradlew
+
+      - name: Build and test every library
+        run: ./gradlew build "-Pversion=${GITHUB_REF_NAME#v}"
+
+      - name: Attach every library's jar to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          # One asset per library, each named <pluginId>-<version>-all.jar. HouseGraph matches a
+          # library to its own jar by that name, so the naming is load-bearing rather than tidy:
+          # get it wrong and installing one library silently installs a different one.
+          files: '*/build/libs/*-all.jar'
+          generate_release_notes: true

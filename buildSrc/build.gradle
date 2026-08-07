@@ -1,0 +1,15 @@
+plugins {
+    // Lets src/main/groovy/*.gradle become plugins the subprojects can apply by id.
+    id 'groovy-gradle-plugin'
+}
+
+repositories {
+    gradlePluginPortal()
+}
+
+dependencies {
+    // A precompiled script plugin can't write `plugins { id 'x' version 'y' }` — the versions have
+    // to be on buildSrc's own classpath instead. These are the plugin marker coordinates.
+    implementation 'com.gradleup.shadow:com.gradleup.shadow.gradle.plugin:8.3.5'
+    implementation 'org.openjfx.javafxplugin:org.openjfx.javafxplugin.gradle.plugin:0.1.0'
+}

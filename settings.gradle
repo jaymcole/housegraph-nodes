@@ -1,0 +1,5 @@
+rootProject.name = 'housegraph-nodes'
+
+// One node library per subproject. Each is an independent library from HouseGraph's point of
+// view — its own id, its own manifest, its own jar — they just share a build and a release.
+include 'housegraph-iot'
