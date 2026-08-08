@@ -3,8 +3,8 @@ plugins {
 }
 
 nodeLibrary {
-    id = 'housegraph-iot'
-    libraryName = 'IoT'
+    id = 'housegraph-squirrel'
+    libraryName = 'Squirrel Signal'
     description = 'Nodes for small networked devices — an Arduino LED-matrix sign that shows what the camera saw.'
     nodePackages = ['io.github.jaymcole.housegraph.plugins.iot.nodes']
 }

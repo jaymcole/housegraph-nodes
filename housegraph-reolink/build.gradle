@@ -3,8 +3,8 @@ plugins {
 }
 
 nodeLibrary {
-    id = 'housegraph-camera'
-    libraryName = 'Camera'
+    id = 'housegraph-reolink'
+    libraryName = 'Reolink'
     description = 'ONVIF WS-Discovery + Reolink HTTP CGI: camera discovery, snapshot, and motion status.'
     nodePackages = ['io.github.jaymcole.housegraph.plugins.camera.nodes']
 }
