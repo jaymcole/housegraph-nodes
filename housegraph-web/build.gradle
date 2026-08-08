@@ -1,0 +1,23 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-web'
+    libraryName = 'Web'
+    description = 'Hosts a directory of static files, or an external Node.js server, on the LAN as <name>.local.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.web.nodes']
+}
+
+dependencies {
+    // Pure-Java mDNS/Bonjour: advertises "<name>.local" + an _http._tcp service on the LAN (the
+    // JDK has no mDNS of its own).
+    implementation('org.jmdns:jmdns:3.5.9') {
+        // jmdns depends on slf4j-api itself (confirmed via `gradlew :app:dependencies` on the
+        // pre-extraction build). Left alone that transitive dependency ends up bundled into the
+        // shaded jar too, which the host's install-time validation rejects a jar for -- a bundled
+        // slf4j-api means a second, silently-swallowing logging binding. See housegraph-discord's
+        // build.gradle for the same fix against JDA; this is now the second library to need it.
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+}
