@@ -29,7 +29,7 @@ abstract class NodeLibraryExtension {
 
     /**
      * The Add-Node submenu this library's nodes nest under. Defaults to the id with any
-     * {@code housegraph-} prefix stripped, so {@code housegraph-iot} groups its nodes under "iot" —
+     * {@code housegraph-} prefix stripped, so {@code housegraph-squirrel} groups its nodes under "iot" —
      * which is what they were called while they lived in the app.
      */
     abstract Property<String> getCategoryPrefix()

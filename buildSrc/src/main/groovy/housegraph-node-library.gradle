@@ -10,7 +10,7 @@
  *
  *     plugins { id 'housegraph-node-library' }
  *     nodeLibrary {
- *         id = 'housegraph-iot'
+ *         id = 'housegraph-squirrel'
  *         description = '...'
  *         nodePackages = ['io.github.jaymcole.housegraph.plugins.iot.nodes']
  *     }
