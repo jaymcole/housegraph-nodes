@@ -1,0 +1,53 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-ml'
+    libraryName = 'ML'
+    description = 'Local, JVM-native image classification via Deep Java Library (PyTorch) — no Python, no external service.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.ml.nodes']
+}
+
+// AnimalClassifierNode converts its JavaFX Image input to a BufferedImage via SwingFXUtils, which
+// needs javafx.swing on top of the javafx.controls the convention plugin already puts on
+// compileOnly. Re-declaring the javafx block here replaces (doesn't merge with) the module list
+// set by the convention plugin, so both modules must be listed again.
+javafx {
+    modules = ['javafx.controls', 'javafx.swing']
+}
+
+dependencies {
+    // Deep Java Library: JVM-native ML inference. The BOM pins every DJL artifact to one version;
+    // the PyTorch engine downloads its native library (and models download their weights) on first
+    // use into DJL's on-disk cache under the user's home — no Python, no manual native jars.
+    implementation platform('ai.djl:bom:0.36.0')
+
+    // ai.djl:api depends on slf4j-api itself (confirmed via `gradlew :app:dependencies` on the
+    // pre-extraction HouseGraph build). Left alone that transitive dependency ends up bundled into
+    // the shaded jar too, which the host's install-time validation rejects a jar for — a bundled
+    // slf4j-api means a second, silently-swallowing logging binding. housegraph-api already
+    // supplies the real one, compileOnly. Same fix as housegraph-discord (JDA) and housegraph-web
+    // (jmdns), the third library to need it — applied on all three DJL coordinates below since
+    // pytorch-model-zoo and pytorch-engine each pull their own transitive path to ai.djl:api, not
+    // just the one declared directly here.
+    implementation('ai.djl:api') {
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+    implementation('ai.djl.pytorch:pytorch-model-zoo') {
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+    runtimeOnly('ai.djl.pytorch:pytorch-engine') {
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+}
+
+shadowJar {
+    // Not relocated, deliberately, unlike the template's default advice — same reasoning as
+    // housegraph-discord's JDA. housegraph-ml is the only library bundling DJL, so there is
+    // nothing to collide with yet, and DJL's ServiceLoader-based engine discovery (already
+    // handled by mergeServiceFiles()) plus its native-library loading make blind relocation risky
+    // for no present benefit. Revisit if a second DJL-bundling library is ever installed alongside
+    // this one.
+    mergeServiceFiles()
+}
