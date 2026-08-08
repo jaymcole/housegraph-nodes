@@ -81,13 +81,40 @@ release carries several.
 - **`onExecuted()` reaches you on the JavaFX thread**, so your UI code needs no `Platform.runLater`.
   Work *you* start does.
 
+## Building
+
+To build every library's installable jar locally, without releasing anything:
+
+```bash
+./gradlew shadedJars
+```
+
+Each library's `<pluginId>-<version>-all.jar` lands under its own `build/libs/` (e.g.
+`housegraph-web/build/libs/housegraph-web-0.1.0-all.jar`). Pass `-Pversion=X.Y.Z` to control the
+version stamp; without it, every library falls back to `0.1.0` (see the root `build.gradle`).
+`./gradlew build` does the same plus runs every library's tests.
+
 ## Releasing
 
 ```bash
-git tag v0.1.0 && git push --tags
+git tag v0.3.0
+git push --tags
 ```
 
-The workflow builds and tests everything, then attaches each library's `-all.jar` to the release.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
+
+1. Checks out, sets up JDK 21.
+2. Runs `./gradlew build -Pversion=<tag without the v>` — builds and tests every library at that
+   version.
+3. Attaches every library's `*-all.jar` to a GitHub Release, with auto-generated release notes.
+
+Because versioning is lockstep (see above), one tag releases all five libraries at that version
+number, even if only one of them actually changed.
+
+**The jar naming is load-bearing, not cosmetic.** A release carries five jars; HouseGraph's
+installer matches `<pluginId>-<version>-all.jar` to pick the right one. Don't rename these
+manually, and don't hand-edit `shadowJar { archiveBaseName = ... }` in a library's `build.gradle` —
+it's already correct via the convention plugin.
 
 ## License
 
