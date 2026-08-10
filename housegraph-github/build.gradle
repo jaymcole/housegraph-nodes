@@ -5,7 +5,7 @@ plugins {
 nodeLibrary {
     id = 'housegraph-github'
     libraryName = 'GitHub'
-    description = 'Keeps a local folder in sync with a git repository - clone once, then poll and pull on an interval.'
+    description = 'Checks a git repository for new commits and pulls them into a local folder, clone-on-first-use.'
     nodePackages = ['io.github.jaymcole.housegraph.plugins.github.nodes']
 }
 
