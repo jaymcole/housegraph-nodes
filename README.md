@@ -11,6 +11,7 @@ they just share a build and a release.
 | `housegraph-reolink` | Discover Cameras, Camera Motion Status, Camera Snapshot | nothing |
 | `housegraph-web` | Web Server, Node Server | jmdns |
 | `housegraph-ml` | Animal Classifier | Deep Java Library (PyTorch) |
+| `housegraph-github` | Git Sync | JGit |
 
 ## Installing
 

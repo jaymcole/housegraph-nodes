@@ -1,0 +1,35 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-github'
+    libraryName = 'GitHub'
+    description = 'Keeps a local folder in sync with a git repository - clone once, then poll and pull on an interval.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.github.nodes']
+}
+
+dependencies {
+    // Pure-Java git client: clone/fetch/reset without depending on a system `git` binary being
+    // installed on the host machine.
+    implementation('org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r') {
+        // JGit depends on slf4j-api itself. Left alone, that transitive dependency ends up bundled
+        // in the shaded jar too, which is exactly what the host's install-time validation rejects a
+        // jar for: a bundled slf4j-api means a second, separately initialised SLF4J binding with no
+        // sinks attached, silently swallowing every log line this library (and JGit inside it)
+        // produces. housegraph-api already supplies slf4j-api compileOnly, and the host provides the
+        // real one at runtime, so this library never needs its own copy. Same fix as
+        // housegraph-discord (JDA), housegraph-ml (DJL) and housegraph-web (jmdns).
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+}
+
+shadowJar {
+    // Not relocated, deliberately, unlike the template's default advice — same reasoning as
+    // housegraph-discord's JDA and housegraph-ml's DJL. housegraph-github is the only library in
+    // this repository (or known to exist anywhere) that bundles JGit, so there is nothing to
+    // collide with yet, and JGit's own service-loader-based transport/storage discovery (already
+    // handled by mergeServiceFiles()) makes blind relocation risky for no present benefit. Revisit
+    // if a second JGit-bundling library is ever installed alongside this one.
+    mergeServiceFiles()
+}
