@@ -3,6 +3,7 @@ package io.github.jaymcole.housegraph.plugins.web.nodes;
 import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
+import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
@@ -20,6 +21,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,6 +43,15 @@ import java.util.Map;
  * Unlike {@code WebServerNode} there is no {@code Store} data input: a Node app manages its own
  * routes and persistence. The declared port is exported to the child as {@code PORT} and
  * advertised over mDNS, but the Node program is responsible for actually listening on it.
+ * <p>
+ * Unlike {@code WebServerNode} — which serves files straight off disk, so a {@code git pull}
+ * shows up on the very next request — a Node process only sees new code by being relaunched.
+ * That's what the <b>Restart</b> flow-in is for: wire something's flow-out into it (e.g.
+ * {@code housegraph-github}'s Git Sync {@code Pulled} port) to relaunch the process with its
+ * current config whenever new commits land. It's additive, not a replacement for the Start/Stop
+ * buttons: ensures the process is running with fresh code either way, restarting it if already
+ * running or starting it fresh if not, and reflects the result in the same status label the
+ * buttons drive.
  */
 @Display.Name("Node Server")
 @Node.Type("web.NodeServerNode")
@@ -51,6 +62,7 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     private static final String DEFAULT_COMMAND = "npm start";
 
     private final NodeProcessServer server = new NodeProcessServer();
+    private final FlowPort restart = new FlowPort("Restart", FlowPort.Direction.IN);
     private String resourceName = "node-app";
     private String directory;
     private String command = DEFAULT_COMMAND;
@@ -66,9 +78,29 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     private Button copyUrlButton;
     private Label statusLabel;
 
+    /**
+     * The Restart flow-in's handler: (re)launches the process with the current config, run
+     * directly on the engine's own execution thread rather than a hand-rolled one (unlike
+     * {@link #start()}, which is called straight from a UI button with nothing else running it
+     * off the FX thread). A misconfigured node (no directory/command yet) or a spawn failure
+     * throws, which the engine surfaces as this node's error for {@link #onExecuted()} to show.
+     */
     @Override
     public void process(ProcessContext ctx) {
-        // No data inputs; nothing to resolve. The server is driven entirely by its inline config.
+        if (directory == null || directory.isBlank()) {
+            throw new IllegalStateException("No Node project directory configured");
+        }
+        if (command == null || command.isBlank()) {
+            throw new IllegalStateException("No start command configured");
+        }
+        if (server.isRunning()) {
+            server.stop();
+        }
+        try {
+            server.start(Path.of(directory), command, resourceName, port);
+        } catch (IOException e) {
+            throw new RuntimeException("Node server restart failed for " + resourceName, e);
+        }
     }
 
     @Override
@@ -77,6 +109,11 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
 
     @Override
     public void configureOutputs() {
+    }
+
+    @Override
+    public void configureFlowInputs() {
+        addFlowInput(restart);
     }
 
     @Override
@@ -114,6 +151,29 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     protected void onRemoved() {
         ResourceRegistry.shared().unregister(resourceName);
         server.stop();
+    }
+
+    /**
+     * Reflects a Restart flow-in firing in the same status label/buttons the Start/Stop path
+     * drives. Only that path runs through {@code process()} — a button click calls {@link #start}/
+     * {@link #stop} directly — so this only ever fires for a flow-triggered restart. Reached on
+     * the FX thread (the engine's callback executor); a no-op if the node's UI was never built.
+     */
+    @Override
+    protected void onExecuted() {
+        if (statusLabel == null) {
+            return;
+        }
+        Throwable error = getLastError();
+        if (error != null) {
+            statusLabel.setText("Restart failed — " + error.getMessage());
+            return;
+        }
+        statusLabel.setText("Running at " + server.url());
+        setEditingLocked(true);
+        startButton.setDisable(true);
+        stopButton.setDisable(false);
+        copyUrlButton.setDisable(false);
     }
 
     @Override

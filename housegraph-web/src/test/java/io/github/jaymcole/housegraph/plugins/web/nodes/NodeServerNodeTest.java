@@ -1,17 +1,36 @@
 package io.github.jaymcole.housegraph.plugins.web.nodes;
 
+import io.github.jaymcole.housegraph.graph.ProcessContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Verifies the Node-server node round-trips its inline configuration through {@code saveState}/
- * {@code loadState} — the only headless surface (start/stop spawns a real {@code node} process and
- * touches the network, which belongs in a manual/integration check, not the unit suite).
+ * {@code loadState}, and the shape/guard rails of its Restart flow-in — the only headless
+ * surfaces (actually spawning/relaunching a {@code node} process touches the OS and the network,
+ * which belongs in a manual/integration check, not the unit suite).
  */
 class NodeServerNodeTest {
+
+    @Test
+    void declaresARestartFlowInput() {
+        NodeServerNode node = new NodeServerNode();
+
+        assertEquals(1, node.getFlowInputs().size());
+        assertEquals("Restart", node.getFlowInputs().get(0).name);
+    }
+
+    @Test
+    void restartRefusesToRunWithoutAProjectDirectory() {
+        NodeServerNode node = new NodeServerNode();
+
+        assertThrows(IllegalStateException.class, () -> node.process(ProcessContext.uncancelled()),
+                "the Restart flow-in shouldn't silently no-op on a node nobody has configured yet");
+    }
 
     @Test
     void savesAndReloadsConfiguration() {
