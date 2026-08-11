@@ -68,14 +68,15 @@ import java.util.Map;
  * Files are served straight off disk, so an edit that lands directly in the served directory — a
  * hand-authored HTML/CSS/JS site, say — shows up on the very next request with nothing further
  * needed. A site built from source (a React app compiled into the served directory by a bundler)
- * is different: the served files only change when something reruns that build. That's what the
- * <b>Rebuild</b> flow-in is for: wire something's flow-out into it (e.g. {@code housegraph-github}'s
- * Git Sync {@code Pulled} port) to rerun the configured build command whenever new source lands,
- * via {@link io.github.jaymcole.housegraph.plugins.web.SiteBuilder}. It never restarts the HTTP
- * server itself — {@link LocalWebServer} already rereads the served directory from disk on every
- * request, so a fresh build is all a rebuild needs to take effect. Leaving the build directory
- * unset (the default) makes Rebuild a no-op: nothing to build, same as leaving the {@code Store}
- * input unwired.
+ * is different: the served files only change when something reruns that build. That's why
+ * {@link #buildCommand} (e.g. {@code npm run build}, the default) runs in {@code Directory} both
+ * at Start and via the <b>Rebuild</b> flow-in — wire something's flow-out into Rebuild (e.g.
+ * {@code housegraph-github}'s Git Sync {@code Pulled} port) to rerun the build whenever new source
+ * lands, via {@link io.github.jaymcole.housegraph.plugins.web.SiteBuilder}. Neither ever restarts
+ * the HTTP server itself — {@link LocalWebServer} already rereads the served directory from disk
+ * on every request, so a fresh build is all it takes to serve the update. Clear
+ * {@code buildCommand} to opt out for a project with no build step (nothing to build, same as
+ * leaving the {@code Store} input unwired).
  */
 @Display.Name("Web Server")
 @Node.Type("web.WebServerNode")
@@ -98,8 +99,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private int port = DEFAULT_PORT;
     /** Optional backend to reverse-proxy at {@code /bridge/*} (e.g. {@code http://localhost:3000}); null = none. */
     private String proxyTarget;
-    /** Optional project directory the Rebuild flow-in runs {@link #buildCommand} in; null = Rebuild is a no-op. */
-    private String buildDirectory;
+    /** Shell command run in {@code Directory} at Start and on Rebuild; blank skips the build step. */
     private String buildCommand = DEFAULT_BUILD_COMMAND;
     /** Subfolder of {@code Directory} actually served, e.g. {@code dist}; blank serves {@code Directory} itself. */
     private String outputFolder = DEFAULT_OUTPUT_FOLDER;
@@ -112,7 +112,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private boolean wasRunning;
 
     private TextField nameField;
-    private TextField buildDirectoryField;
     private TextField buildCommandField;
     private TextField outputFolderField;
     private TextField portField;
@@ -130,11 +129,11 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         resolvedStore = storeInput.getValue();
         resolvedDirectory = directoryInput.getValue();
 
-        // Also runs the build step (if configured) — both when beginProcessing() is invoked
-        // manually at Start and when the Rebuild flow-in fires, since both paths go through this
-        // one process() method. Unconfigured (the common case: no bundler in front of the served
-        // files) is a no-op either way; misconfigured (a directory but no command) throws, which
-        // the engine surfaces as this node's error for onExecuted() to show.
+        // Also runs the build step (if configured) in the just-resolved directory — both when
+        // beginProcessing() is invoked manually at Start and when the Rebuild flow-in fires, since
+        // both paths go through this one process() method. A cleared buildCommand (opting out of a
+        // build step) or no directory yet resolved is a no-op either way; a build failure throws,
+        // which the engine surfaces as this node's error for onExecuted()/start() to show.
         try {
             runBuildIfConfigured();
         } catch (IOException e) {
@@ -157,15 +156,19 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         addFlowInput(rebuild);
     }
 
-    /** Runs {@link #buildCommand} in {@link #buildDirectory} if one is configured; a no-op otherwise. */
+    /**
+     * Runs {@link #buildCommand} in {@link #resolvedDirectory} — a no-op if the build step was
+     * cleared (opted out) or {@code Directory} hasn't resolved to anything yet; {@code start()}'s
+     * own directory check reports that case, so this one just quietly skips the build.
+     */
     private void runBuildIfConfigured() throws IOException {
-        if (buildDirectory == null || buildDirectory.isBlank()) {
+        if (buildCommand == null || buildCommand.isBlank()) {
             return;
         }
-        if (buildCommand == null || buildCommand.isBlank()) {
-            throw new IllegalStateException("No build command configured");
+        if (resolvedDirectory == null || resolvedDirectory.isBlank()) {
+            return;
         }
-        SiteBuilder.run(Path.of(buildDirectory), buildCommand);
+        SiteBuilder.run(Path.of(resolvedDirectory), buildCommand);
     }
 
     @Override
@@ -175,9 +178,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         state.put("port", Integer.toString(port));
         if (proxyTarget != null) {
             state.put("proxyTarget", proxyTarget);
-        }
-        if (buildDirectory != null) {
-            state.put("buildDirectory", buildDirectory);
         }
         state.put("buildCommand", buildCommand);
         state.put("outputFolder", outputFolder);
@@ -202,9 +202,11 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         }
         port = parsePort(state.get("port"));
         proxyTarget = emptyToNull(state.get("proxyTarget"));
-        buildDirectory = emptyToNull(state.get("buildDirectory"));
+        // Distinct from a plain "fall back to the default if blank" read: an explicitly cleared
+        // buildCommand ("skip the build step") must round-trip as blank, not snap back to "npm run
+        // build" — only an absent key (a save from before buildCommand existed) defaults to it.
         String savedBuildCommand = state.get("buildCommand");
-        if (savedBuildCommand != null && !savedBuildCommand.isBlank()) {
+        if (savedBuildCommand != null) {
             buildCommand = savedBuildCommand;
         }
         // Distinct from the blank checks above: an explicitly emptied outputFolder ("serve
@@ -272,12 +274,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         proxyField.setPromptText("API proxy target → /bridge (e.g. http://localhost:3000)");
         proxyField.textProperty().addListener((obs, old, value) -> proxyTarget = emptyToNull(value));
 
-        buildDirectoryField = new TextField(buildDirectory == null ? "" : buildDirectory);
-        buildDirectoryField.setPromptText("Build directory (optional, e.g. React project root)…");
-        buildDirectoryField.textProperty().addListener((obs, old, value) -> buildDirectory = emptyToNull(value));
-
         buildCommandField = new TextField(buildCommand);
-        buildCommandField.setPromptText("Build command (e.g. npm run build)");
+        buildCommandField.setPromptText("Build command, run in Directory (blank to skip, e.g. npm run build)");
         buildCommandField.textProperty().addListener((obs, old, value) -> buildCommand = value);
 
         outputFolderField = new TextField(outputFolder);
@@ -302,7 +300,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, outputFolderField, buildDirectoryField, buildCommandField, portField, proxyField,
+        return new VBox(4, nameField, outputFolderField, buildCommandField, portField, proxyField,
                 buttons, copyUrlButton, statusLabel);
     }
 
@@ -456,7 +454,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     private void setEditingLocked(boolean locked) {
         nameField.setDisable(locked);
-        buildDirectoryField.setDisable(locked);
         buildCommandField.setDisable(locked);
         outputFolderField.setDisable(locked);
         portField.setDisable(locked);

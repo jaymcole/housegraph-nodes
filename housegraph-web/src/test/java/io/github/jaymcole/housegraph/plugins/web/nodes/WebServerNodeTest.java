@@ -155,36 +155,57 @@ class WebServerNodeTest {
     }
 
     @Test
-    void rebuildWithNoBuildDirectoryConfiguredIsANoOp() {
+    void buildStepIsSkippedWhenNoDirectoryHasResolvedYet() {
         WebServerNode web = new WebServerNode();
 
         assertDoesNotThrow(() -> web.process(ProcessContext.uncancelled()),
-                "with no build step configured, Rebuild should do nothing rather than fail — "
-                        + "most sites here are hand-authored, not built from source");
+                "with no Directory wired or typed in yet, there's nothing to build in — the build "
+                        + "step should quietly skip rather than fail (start()'s own directory check "
+                        + "is what reports that case to the user)");
+    }
+
+    @Test
+    void buildStepIsSkippedWhenBuildCommandIsCleared(@TempDir Path dir) {
+        NodeGraph graph = new NodeGraph();
+        WebServerNode web = new WebServerNode();
+        web.loadState(Map.of("name", "site", "directory", dir.toString(), "buildCommand", ""));
+        graph.addNode(web);
+
+        assertDoesNotThrow(web::beginProcessing,
+                "clearing buildCommand opts out of the build step, e.g. for a hand-authored site "
+                        + "with no build tooling — process() must not try to run a blank command");
     }
 
     @Test
     void savesAndReloadsBuildConfiguration() {
         WebServerNode original = new WebServerNode();
-        original.loadState(Map.of(
-                "name", "site",
-                "buildDirectory", "/srv/site-src",
-                "buildCommand", "yarn build"));
+        original.loadState(Map.of("name", "site", "buildCommand", "yarn build"));
 
         Map<String, String> saved = original.saveState();
 
         WebServerNode reloaded = new WebServerNode();
         reloaded.loadState(saved);
 
-        assertEquals("/srv/site-src", saved.get("buildDirectory"));
         assertEquals("yarn build", saved.get("buildCommand"));
         assertEquals(saved, reloaded.saveState(), "build config should survive a save/load round-trip unchanged");
     }
 
     @Test
-    void aFreshNodeHasNoBuildDirectoryConfigured() {
-        assertFalse(new WebServerNode().saveState().containsKey("buildDirectory"),
-                "a node nobody has pointed at a source project shouldn't persist a build directory");
+    void anExplicitlyEmptiedBuildCommandRoundTripsAsBlankNotTheDefault() {
+        WebServerNode original = new WebServerNode();
+        original.loadState(Map.of("name", "site", "buildCommand", ""));
+
+        Map<String, String> saved = original.saveState();
+
+        assertEquals("", saved.get("buildCommand"),
+                "opting out must persist as blank, not silently revert to the \"npm run build\" default");
+    }
+
+    @Test
+    void aFreshNodeDefaultsToBuildingWithNpmRunBuild() {
+        assertEquals("npm run build", new WebServerNode().saveState().get("buildCommand"),
+                "matches Vite's/most JS bundlers' default build script, so a freshly-wired project "
+                        + "root builds and serves without extra configuration");
     }
 
     @Test
