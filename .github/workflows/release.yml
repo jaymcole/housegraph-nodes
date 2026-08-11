@@ -3,9 +3,18 @@ name: Release
 # Pushing a tag releases every library in this repository at that version. Lockstep is the trade
 # this layout makes: releasing one library bumps the others' version numbers, in exchange for an
 # API bump being one commit and one release rather than one per repository.
+# Also accepts workflow_dispatch, with the tag as an input: a workflow's own GITHUB_TOKEN is
+# blocked from triggering other workflows' `push: tags` events (GitHub's anti-recursion guard), so
+# auto-tag.yml — which pushes tags with that same token — cannot rely on this trigger firing and
+# instead dispatches this workflow directly. workflow_dispatch is exempt from that guard.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v0.8.0'
+        required: true
 
 permissions:
   contents: write
@@ -15,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -25,11 +36,14 @@ jobs:
       - run: chmod +x ./gradlew
 
       - name: Build and test every library
-        run: ./gradlew build "-Pversion=${GITHUB_REF_NAME#v}"
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: ./gradlew build "-Pversion=${TAG#v}"
 
       - name: Attach every library's jar to the release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           # One asset per library, each named <pluginId>-<version>-all.jar. HouseGraph matches a
           # library to its own jar by that name, so the naming is load-bearing rather than tidy:
           # get it wrong and installing one library silently installs a different one.
