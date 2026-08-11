@@ -56,6 +56,15 @@ import java.util.Map;
  * rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses Start for the
  * user once the graph (including the {@code Store} edge) is fully loaded (see {@link AutoStartable}).
  * <p>
+ * The files actually served live under {@code Directory}'s {@link #outputFolder}, not
+ * {@code Directory} itself — {@code Directory} is meant to be wireable to a project's root (e.g.
+ * a Create Folder or Git Sync node), while a bundler like Vite writes its build to a subfolder of
+ * that root ({@code dist} by default) rather than the root itself. Serving {@code Directory}
+ * unmodified would hand the browser raw, untranspiled source (e.g. a Vite {@code index.html}
+ * referencing {@code /src/main.tsx}), which fails to load with an unsupported-MIME-type error since
+ * static file serving can't transpile JSX/TypeScript. Leave {@code outputFolder} blank to serve
+ * {@code Directory} directly, for a project with no build step.
+ * <p>
  * Files are served straight off disk, so an edit that lands directly in the served directory — a
  * hand-authored HTML/CSS/JS site, say — shows up on the very next request with nothing further
  * needed. A site built from source (a React app compiled into the served directory by a bundler)
@@ -75,6 +84,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private static final Logger log = Log.get(WebServerNode.class);
     private static final int DEFAULT_PORT = 8080;
     private static final String DEFAULT_BUILD_COMMAND = "npm run build";
+    private static final String DEFAULT_OUTPUT_FOLDER = "dist";
     /** Path prefix under which requests are reverse-proxied to {@link #proxyTarget}. */
     private static final String PROXY_PREFIX = "/bridge";
 
@@ -91,6 +101,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     /** Optional project directory the Rebuild flow-in runs {@link #buildCommand} in; null = Rebuild is a no-op. */
     private String buildDirectory;
     private String buildCommand = DEFAULT_BUILD_COMMAND;
+    /** Subfolder of {@code Directory} actually served, e.g. {@code dist}; blank serves {@code Directory} itself. */
+    private String outputFolder = DEFAULT_OUTPUT_FOLDER;
 
     /** The store handle captured from the {@code Store} input at Start; null when nothing is wired. */
     private volatile JsonDocumentStore resolvedStore;
@@ -102,6 +114,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private TextField nameField;
     private TextField buildDirectoryField;
     private TextField buildCommandField;
+    private TextField outputFolderField;
     private TextField portField;
     private TextField proxyField;
     private Button startButton;
@@ -167,6 +180,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
             state.put("buildDirectory", buildDirectory);
         }
         state.put("buildCommand", buildCommand);
+        state.put("outputFolder", outputFolder);
         if (server.isRunning()) {
             state.put("running", "true");
         }
@@ -192,6 +206,13 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         String savedBuildCommand = state.get("buildCommand");
         if (savedBuildCommand != null && !savedBuildCommand.isBlank()) {
             buildCommand = savedBuildCommand;
+        }
+        // Distinct from the blank checks above: an explicitly emptied outputFolder ("serve
+        // Directory directly") must round-trip as blank, not fall back to the "dist" default —
+        // only an absent key (a save from before this field existed) should default to "dist".
+        String savedOutputFolder = state.get("outputFolder");
+        if (savedOutputFolder != null) {
+            outputFolder = savedOutputFolder;
         }
         wasRunning = Boolean.parseBoolean(state.get("running"));
     }
@@ -259,6 +280,10 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         buildCommandField.setPromptText("Build command (e.g. npm run build)");
         buildCommandField.textProperty().addListener((obs, old, value) -> buildCommand = value);
 
+        outputFolderField = new TextField(outputFolder);
+        outputFolderField.setPromptText("Static files subfolder of Directory (e.g. dist)…");
+        outputFolderField.textProperty().addListener((obs, old, value) -> outputFolder = value);
+
         startButton = new Button("Start");
         startButton.setMaxWidth(Double.MAX_VALUE);
         startButton.setOnAction(e -> start());
@@ -277,7 +302,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, buildDirectoryField, buildCommandField, portField, proxyField,
+        return new VBox(4, nameField, outputFolderField, buildDirectoryField, buildCommandField, portField, proxyField,
                 buttons, copyUrlButton, statusLabel);
     }
 
@@ -311,8 +336,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
                     });
                     return;
                 }
-                Path root = Path.of(resolvedDirectory);
-                server.start(root, resourceName, port, documentApi(), proxyRoute());
+                server.start(servedRoot(), resourceName, port, documentApi(), proxyRoute());
                 Platform.runLater(() -> {
                     statusLabel.setText("Serving at " + server.url());
                     stopButton.setDisable(false);
@@ -339,6 +363,16 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         startButton.setDisable(false);
         stopButton.setDisable(true);
         copyUrlButton.setDisable(true);
+    }
+
+    /**
+     * The directory actually served: {@link #resolvedDirectory} with {@link #outputFolder}
+     * resolved onto it, or {@code resolvedDirectory} itself when {@code outputFolder} is blank.
+     * Package-private: also a test seam.
+     */
+    Path servedRoot() {
+        Path root = Path.of(resolvedDirectory);
+        return (outputFolder == null || outputFolder.isBlank()) ? root : root.resolve(outputFolder);
     }
 
     /**
@@ -424,6 +458,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         nameField.setDisable(locked);
         buildDirectoryField.setDisable(locked);
         buildCommandField.setDisable(locked);
+        outputFolderField.setDisable(locked);
         portField.setDisable(locked);
         proxyField.setDisable(locked);
     }

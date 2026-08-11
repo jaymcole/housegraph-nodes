@@ -186,4 +186,49 @@ class WebServerNodeTest {
         assertFalse(new WebServerNode().saveState().containsKey("buildDirectory"),
                 "a node nobody has pointed at a source project shouldn't persist a build directory");
     }
+
+    @Test
+    void aFreshNodeDefaultsToServingTheDistSubfolder() {
+        assertEquals("dist", new WebServerNode().saveState().get("outputFolder"),
+                "matches Vite's default build output folder name, so a freshly-wired project root "
+                        + "serves its build output rather than raw, untranspiled source");
+    }
+
+    @Test
+    void servedRootAppendsOutputFolderToTheResolvedDirectory(@TempDir Path dir) {
+        NodeGraph graph = new NodeGraph();
+        WebServerNode web = new WebServerNode();
+        web.loadState(Map.of("name", "site", "directory", dir.toString()));
+        graph.addNode(web);
+
+        web.beginProcessing();
+
+        assertEquals(dir.resolve("dist"), web.servedRoot(),
+                "with the default outputFolder, the server should serve Directory's dist subfolder");
+    }
+
+    @Test
+    void blankOutputFolderServesTheDirectoryItself(@TempDir Path dir) {
+        NodeGraph graph = new NodeGraph();
+        WebServerNode web = new WebServerNode();
+        web.loadState(Map.of("name", "site", "directory", dir.toString(), "outputFolder", ""));
+        graph.addNode(web);
+
+        web.beginProcessing();
+
+        assertEquals(dir, web.servedRoot(),
+                "an explicitly emptied outputFolder should opt back out of the subfolder and serve "
+                        + "Directory directly, e.g. for a hand-authored site with no build step");
+    }
+
+    @Test
+    void anExplicitlyEmptiedOutputFolderRoundTripsAsBlankNotTheDefault() {
+        WebServerNode original = new WebServerNode();
+        original.loadState(Map.of("name", "site", "outputFolder", ""));
+
+        Map<String, String> saved = original.saveState();
+
+        assertEquals("", saved.get("outputFolder"),
+                "opting out must persist as blank, not silently revert to the \"dist\" default");
+    }
 }
