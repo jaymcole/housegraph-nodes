@@ -13,6 +13,7 @@ they just share a build and a release.
 | `housegraph-ml` | Animal Classifier | Deep Java Library (PyTorch) |
 | `housegraph-github` | Git Sync | JGit |
 | `housegraph-experimental` | Lightbulb | nothing |
+| `housegraph-filesystem` | Create Folder | nothing |
 
 ## Installing
 

@@ -1,0 +1,12 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-filesystem'
+    libraryName = 'Filesystem'
+    description = 'Folder management under HouseGraph\'s default storage location.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.filesystem.nodes']
+}
+
+// No dependencies — plain java.nio on top of the API.
