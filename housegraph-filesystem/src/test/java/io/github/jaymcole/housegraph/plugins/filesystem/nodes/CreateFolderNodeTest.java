@@ -17,11 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Exercises {@link CreateFolderNode} headlessly: {@code process()} invoked directly with
- * {@link ProcessContext#uncancelled()} (no {@code NodeGraph}). Which flow-out port fires is
- * graph-cascade behavior — {@code BaseNode.activate()} is a no-op with no {@code ExecutionContext}
- * bound — so that part, and the underlying create-or-reuse mechanics, are covered by
- * {@code RelativeFolderTest} instead; this stays focused on the node's declared ports and its
- * Folder Path output.
+ * {@link ProcessContext#uncancelled()} (no {@code NodeGraph}). The underlying create-or-reuse
+ * mechanics are covered by {@code RelativeFolderTest} instead; this stays focused on the node's
+ * declared ports and its Folder Path output.
  * <p>
  * {@link AppDirectories#get()} caches its resolved root for the life of the JVM, so its home is
  * pointed at a temp directory once, before anything in this class touches it (see
@@ -39,11 +37,11 @@ class CreateFolderNodeTest {
     }
 
     @Test
-    void declaresAFlowInTwoNamedFlowOutsAndAFolderPathOutput() {
+    void declaresNoFlowPortsAndAFolderPathOutput() {
         CreateFolderNode node = new CreateFolderNode();
 
-        assertEquals(1, node.getFlowInputs().size());
-        assertEquals(List.of("Done", "Created"), node.getFlowOutputs().stream().map(port -> port.name).toList());
+        assertTrue(node.getFlowInputs().isEmpty(), "a pure data node has nothing to trigger it");
+        assertTrue(node.getFlowOutputs().isEmpty(), "a pure data node has nothing to report");
         assertEquals(List.of("Folder Path"), node.getOutputs().stream().map(variable -> variable.name).toList());
     }
 
@@ -55,6 +53,19 @@ class CreateFolderNodeTest {
         node.process(ProcessContext.uncancelled());
 
         Path expected = AppDirectories.get().root().resolve("widgets");
+        assertTrue(Files.isDirectory(expected));
+        assertEquals(expected.toString(), folderPathOutput(node).getValue());
+    }
+
+    @Test
+    void pullingItAgainAfterTheFolderAlreadyExistsIsANoOpThatStillResolvesThePath() {
+        CreateFolderNode node = new CreateFolderNode();
+        input(node).setValue("gadgets");
+        node.process(ProcessContext.uncancelled());
+
+        node.process(ProcessContext.uncancelled());
+
+        Path expected = AppDirectories.get().root().resolve("gadgets");
         assertTrue(Files.isDirectory(expected));
         assertEquals(expected.toString(), folderPathOutput(node).getValue());
     }
