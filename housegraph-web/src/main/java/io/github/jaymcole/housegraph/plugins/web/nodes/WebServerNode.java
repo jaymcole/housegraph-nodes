@@ -4,6 +4,7 @@ import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
+import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
@@ -14,6 +15,7 @@ import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import io.github.jaymcole.housegraph.plugins.web.DocumentApi;
 import io.github.jaymcole.housegraph.plugins.web.LocalWebServer;
 import io.github.jaymcole.housegraph.plugins.web.LocalWebServer.ProxyRoute;
+import io.github.jaymcole.housegraph.plugins.web.SiteBuilder;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -23,6 +25,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -51,6 +54,17 @@ import java.util.Map;
  * If it was serving when the graph was saved, it resumes automatically on load: the running flag
  * rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses Start for the
  * user once the graph (including the {@code Store} edge) is fully loaded (see {@link AutoStartable}).
+ * <p>
+ * Files are served straight off disk, so an edit that lands directly in {@code directory} — a hand
+ * -authored HTML/CSS/JS site, say — shows up on the very next request with nothing further needed.
+ * A site built from source (a React app compiled to {@code directory} by a bundler) is different:
+ * the served files only change when something reruns that build. That's what the <b>Rebuild</b>
+ * flow-in is for: wire something's flow-out into it (e.g. {@code housegraph-github}'s Git Sync
+ * {@code Pulled} port) to rerun the configured build command whenever new source lands, via
+ * {@link io.github.jaymcole.housegraph.plugins.web.SiteBuilder}. It never restarts the HTTP server
+ * itself — {@link LocalWebServer} already rereads {@code directory} from disk on every request, so
+ * a fresh build is all a rebuild needs to take effect. Leaving the build directory unset (the
+ * default) makes Rebuild a no-op: nothing to build, same as leaving the {@code Store} input unwired.
  */
 @Display.Name("Web Server")
 @Node.Type("web.WebServerNode")
@@ -58,17 +72,22 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     private static final Logger log = Log.get(WebServerNode.class);
     private static final int DEFAULT_PORT = 8080;
+    private static final String DEFAULT_BUILD_COMMAND = "npm run build";
     /** Path prefix under which requests are reverse-proxied to {@link #proxyTarget}. */
     private static final String PROXY_PREFIX = "/bridge";
 
     private final LocalWebServer server = new LocalWebServer();
     private final NodeVariable<JsonDocumentStore> storeInput =
             new NodeVariable<>("Store", JsonDocumentStore.class);
+    private final FlowPort rebuild = new FlowPort("Rebuild", FlowPort.Direction.IN);
     private String resourceName = "housegraph";
     private String directory;
     private int port = DEFAULT_PORT;
     /** Optional backend to reverse-proxy at {@code /bridge/*} (e.g. {@code http://localhost:3000}); null = none. */
     private String proxyTarget;
+    /** Optional project directory the Rebuild flow-in runs {@link #buildCommand} in; null = Rebuild is a no-op. */
+    private String buildDirectory;
+    private String buildCommand = DEFAULT_BUILD_COMMAND;
 
     /** The store handle captured from the {@code Store} input at Start; null when nothing is wired. */
     private volatile JsonDocumentStore resolvedStore;
@@ -77,6 +96,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     private TextField nameField;
     private TextField directoryField;
+    private TextField buildDirectoryField;
+    private TextField buildCommandField;
     private TextField portField;
     private TextField proxyField;
     private Button startButton;
@@ -89,6 +110,17 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         // Runs during beginProcessing() at Start, with the run's value overlay bound, so this
         // is the one place the edge-resolved store handle is readable. Capture it for the server.
         resolvedStore = storeInput.getValue();
+
+        // Also runs the build step (if configured) — both when beginProcessing() is invoked
+        // manually at Start and when the Rebuild flow-in fires, since both paths go through this
+        // one process() method. Unconfigured (the common case: no bundler in front of the served
+        // files) is a no-op either way; misconfigured (a directory but no command) throws, which
+        // the engine surfaces as this node's error for onExecuted() to show.
+        try {
+            runBuildIfConfigured();
+        } catch (IOException e) {
+            throw new RuntimeException("Site build failed for " + resourceName, e);
+        }
     }
 
     @Override
@@ -98,6 +130,22 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     @Override
     public void configureOutputs() {
+    }
+
+    @Override
+    public void configureFlowInputs() {
+        addFlowInput(rebuild);
+    }
+
+    /** Runs {@link #buildCommand} in {@link #buildDirectory} if one is configured; a no-op otherwise. */
+    private void runBuildIfConfigured() throws IOException {
+        if (buildDirectory == null || buildDirectory.isBlank()) {
+            return;
+        }
+        if (buildCommand == null || buildCommand.isBlank()) {
+            throw new IllegalStateException("No build command configured");
+        }
+        SiteBuilder.run(Path.of(buildDirectory), buildCommand);
     }
 
     @Override
@@ -111,6 +159,10 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         if (proxyTarget != null) {
             state.put("proxyTarget", proxyTarget);
         }
+        if (buildDirectory != null) {
+            state.put("buildDirectory", buildDirectory);
+        }
+        state.put("buildCommand", buildCommand);
         if (server.isRunning()) {
             state.put("running", "true");
         }
@@ -126,6 +178,11 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         directory = emptyToNull(state.get("directory"));
         port = parsePort(state.get("port"));
         proxyTarget = emptyToNull(state.get("proxyTarget"));
+        buildDirectory = emptyToNull(state.get("buildDirectory"));
+        String savedBuildCommand = state.get("buildCommand");
+        if (savedBuildCommand != null && !savedBuildCommand.isBlank()) {
+            buildCommand = savedBuildCommand;
+        }
         wasRunning = Boolean.parseBoolean(state.get("running"));
     }
 
@@ -147,6 +204,28 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         server.stop();
     }
 
+    /**
+     * Reflects a Rebuild flow-in firing in the same status label the Start/Stop path drives. Only
+     * touches the label when there's something worth reporting — a build failure, or a successful
+     * build reflected as the same "Serving at …" text Start itself sets — so it can't stomp on
+     * "Starting…"/"Start failed…" text a concurrent Start is in the middle of writing. Reached on
+     * the FX thread (the engine's callback executor); a no-op if the node's UI was never built.
+     */
+    @Override
+    protected void onExecuted() {
+        if (statusLabel == null) {
+            return;
+        }
+        Throwable error = getLastError();
+        if (error != null) {
+            statusLabel.setText("Rebuild failed — " + error.getMessage());
+            return;
+        }
+        if (server.isRunning()) {
+            statusLabel.setText("Serving at " + server.url());
+        }
+    }
+
     @Override
     public javafx.scene.Node createNodeContent() {
         nameField = new TextField(resourceName);
@@ -166,6 +245,14 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         proxyField.setPromptText("API proxy target → /bridge (e.g. http://localhost:3000)");
         proxyField.textProperty().addListener((obs, old, value) -> proxyTarget = emptyToNull(value));
 
+        buildDirectoryField = new TextField(buildDirectory == null ? "" : buildDirectory);
+        buildDirectoryField.setPromptText("Build directory (optional, e.g. React project root)…");
+        buildDirectoryField.textProperty().addListener((obs, old, value) -> buildDirectory = emptyToNull(value));
+
+        buildCommandField = new TextField(buildCommand);
+        buildCommandField.setPromptText("Build command (e.g. npm run build)");
+        buildCommandField.textProperty().addListener((obs, old, value) -> buildCommand = value);
+
         startButton = new Button("Start");
         startButton.setMaxWidth(Double.MAX_VALUE);
         startButton.setOnAction(e -> start());
@@ -184,7 +271,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, directoryField, portField, proxyField, buttons, copyUrlButton, statusLabel);
+        return new VBox(4, nameField, directoryField, buildDirectoryField, buildCommandField, portField, proxyField,
+                buttons, copyUrlButton, statusLabel);
     }
 
     private void rename(String newName) {
@@ -205,8 +293,13 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
         Thread thread = new Thread(() -> {
             try {
-                // Pull the Store input (if wired) and capture its handle before serving.
+                // Pull the Store input (if wired) and capture its handle, and run the build step
+                // (if configured), before serving.
                 beginProcessing();
+                Throwable buildError = getLastError();
+                if (buildError != null) {
+                    throw new RuntimeException(buildError.getMessage(), buildError);
+                }
                 server.start(root, resourceName, port, documentApi(), proxyRoute());
                 Platform.runLater(() -> {
                     statusLabel.setText("Serving at " + server.url());
@@ -313,6 +406,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private void setEditingLocked(boolean locked) {
         nameField.setDisable(locked);
         directoryField.setDisable(locked);
+        buildDirectoryField.setDisable(locked);
+        buildCommandField.setDisable(locked);
         portField.setDisable(locked);
         proxyField.setDisable(locked);
     }
