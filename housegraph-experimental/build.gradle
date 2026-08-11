@@ -1,0 +1,12 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-experimental'
+    libraryName = 'Experimental'
+    description = 'Fun, exploratory nodes with no purpose beyond making flow visible or trying out an idea.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.experimental.nodes']
+}
+
+// No dependencies — every node here is plain JavaFX on top of the API.
