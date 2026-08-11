@@ -7,6 +7,7 @@ import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.resource.ResourceRegistry;
+import io.github.jaymcole.housegraph.sdk.AutoStartable;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import io.github.jaymcole.housegraph.plugins.web.NodeProcessServer;
 import javafx.scene.control.Button;
@@ -50,10 +51,15 @@ import java.util.Map;
  * buttons: ensures the process is running with fresh code either way, restarting it if already
  * running or starting it fresh if not, and reflects the result in the same status label the
  * buttons drive.
+ * <p>
+ * If it was running when the graph was saved, it resumes automatically on load: the running flag
+ * rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses Start for the
+ * user once the graph (including the {@code Directory} edge) is fully loaded (see
+ * {@link AutoStartable}).
  */
 @Display.Name("Node Server")
 @Node.Type("web.NodeServerNode")
-public class NodeServerNode extends BaseNode implements NodeContentProvider {
+public class NodeServerNode extends BaseNode implements NodeContentProvider, AutoStartable {
 
     private static final int DEFAULT_PORT = 3000;
     private static final String DEFAULT_COMMAND = "npm start";
@@ -65,6 +71,8 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     private String resourceName = "node-app";
     private String command = DEFAULT_COMMAND;
     private int port = DEFAULT_PORT;
+    /** True when the process was running at the moment the loaded graph was saved; drives {@link #autoStartIfWasRunning()}. */
+    private boolean wasRunning;
 
     private TextField nameField;
     private TextField commandField;
@@ -122,6 +130,9 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         state.put("name", resourceName);
         state.put("command", command);
         state.put("port", Integer.toString(port));
+        if (server.isRunning()) {
+            state.put("running", "true");
+        }
         return state;
     }
 
@@ -143,6 +154,14 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
             command = savedCommand;
         }
         port = parsePort(state.get("port"));
+        wasRunning = Boolean.parseBoolean(state.get("running"));
+    }
+
+    @Override
+    public void autoStartIfWasRunning() {
+        if (wasRunning) {
+            start();
+        }
     }
 
     @Override
@@ -260,6 +279,11 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         content.putString(url);
         Clipboard.getSystemClipboard().setContent(content);
         statusLabel.setText("Copied " + url);
+    }
+
+    /** Test seam: whether the loaded graph had this server running, i.e. auto-start is pending. */
+    boolean wasRunning() {
+        return wasRunning;
     }
 
     private void setEditingLocked(boolean locked) {

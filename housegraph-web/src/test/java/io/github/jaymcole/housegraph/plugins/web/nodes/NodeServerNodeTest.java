@@ -6,7 +6,9 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the Node-server node round-trips its inline configuration through {@code saveState}/
@@ -76,5 +78,21 @@ class NodeServerNodeTest {
         node.loadState(Map.of("name", "app", "port", "not-a-number"));
 
         assertEquals("3000", node.saveState().get("port"), "an unparseable port should fall back to the default");
+    }
+
+    @Test
+    void aStoppedServerDoesNotPersistARunningFlag() {
+        assertFalse(new NodeServerNode().saveState().containsKey("running"),
+                "a process that isn't running must not persist a running flag");
+    }
+
+    @Test
+    void loadingARunningFlagArmsAutoStart() {
+        NodeServerNode node = new NodeServerNode();
+        assertFalse(node.wasRunning(), "a fresh node has no pending auto-start");
+
+        node.loadState(Map.of("name", "my-app", "port", "4000", "running", "true"));
+
+        assertTrue(node.wasRunning(), "a graph saved while running reloads with auto-start pending");
     }
 }
