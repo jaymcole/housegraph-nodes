@@ -37,7 +37,6 @@ class NodeServerNodeTest {
         NodeServerNode original = new NodeServerNode();
         original.loadState(Map.of(
                 "name", "my-app",
-                "directory", "/srv/my-app",
                 "command", "node server.js",
                 "port", "4000"));
 
@@ -47,10 +46,28 @@ class NodeServerNodeTest {
         reloaded.loadState(saved);
 
         assertEquals("my-app", saved.get("name"));
-        assertEquals("/srv/my-app", saved.get("directory"));
         assertEquals("node server.js", saved.get("command"));
         assertEquals("4000", saved.get("port"));
         assertEquals(saved, reloaded.saveState(), "config should survive a save/load round-trip unchanged");
+    }
+
+    @Test
+    void declaresADirectoryDataInput() {
+        NodeServerNode node = new NodeServerNode();
+
+        assertEquals(1, node.getInputs().size());
+        assertEquals("Directory", node.getInputs().get(0).name);
+    }
+
+    @Test
+    void legacyDirectoryInSavedStateMigratesOntoTheDirectoryInput() {
+        NodeServerNode node = new NodeServerNode();
+
+        node.loadState(Map.of("name", "my-app", "directory", "/srv/my-app"));
+
+        assertEquals("/srv/my-app", node.getInputs().get(0).getValue(),
+                "a pre-input-port save's directory should land on the new Directory input, "
+                        + "not be dropped, since saveState()/loadState() no longer carries it");
     }
 
     @Test

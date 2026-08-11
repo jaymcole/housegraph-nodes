@@ -4,13 +4,11 @@ import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
 import io.github.jaymcole.housegraph.graph.FlowPort;
+import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
-import io.github.jaymcole.housegraph.logging.Log;
-import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.resource.ResourceRegistry;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import io.github.jaymcole.housegraph.plugins.web.NodeProcessServer;
-import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
@@ -33,10 +31,12 @@ import java.util.Map;
  * JVM's built-in HTTP server. It backs a {@link NodeProcessServer} rather than a
  * {@code LocalWebServer}.
  * <p>
- * Configuration — the server name, the project directory, the start command, and the port — is
- * authored inline and persisted via {@link #saveState()} (a directory path and command string,
- * never the project files themselves; the app is run live from wherever it lives on disk). The
- * process spawn and mDNS advertisement run off the UI thread so the app stays responsive.
+ * Configuration — the server name, the start command, and the port — is authored inline and
+ * persisted via {@link #saveState()} (never the project files themselves; the app is run live
+ * from wherever it lives on disk). The project directory is a data input ({@code Directory}),
+ * typed in directly or wired from an upstream node (e.g. a Create Folder node's output), and
+ * persisted as an ordinary port value rather than through {@link #saveState()}. The process
+ * spawn and mDNS advertisement run off the UI thread so the app stays responsive.
  * <p>
  * Unlike {@code WebServerNode} there is no {@code Store} data input: a Node app manages its own
  * routes and persistence. The declared port is exported to the child as {@code PORT} and
@@ -55,19 +55,18 @@ import java.util.Map;
 @Node.Type("web.NodeServerNode")
 public class NodeServerNode extends BaseNode implements NodeContentProvider {
 
-    private static final Logger log = Log.get(NodeServerNode.class);
     private static final int DEFAULT_PORT = 3000;
     private static final String DEFAULT_COMMAND = "npm start";
 
     private final NodeProcessServer server = new NodeProcessServer();
     private final FlowPort restart = new FlowPort("Restart", FlowPort.Direction.IN);
+    private final NodeVariable<String> directoryInput =
+            new NodeVariable<>("Directory", String.class, true).required();
     private String resourceName = "node-app";
-    private String directory;
     private String command = DEFAULT_COMMAND;
     private int port = DEFAULT_PORT;
 
     private TextField nameField;
-    private TextField directoryField;
     private TextField commandField;
     private TextField portField;
     private Button startButton;
@@ -76,14 +75,17 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     private Label statusLabel;
 
     /**
-     * The Restart flow-in's handler: (re)launches the process with the current config, run
-     * directly on the engine's own execution thread rather than a hand-rolled one (unlike
-     * {@link #start()}, which is called straight from a UI button with nothing else running it
-     * off the FX thread). A misconfigured node (no directory/command yet) or a spawn failure
-     * throws, which the engine surfaces as this node's error for {@link #onExecuted()} to show.
+     * (Re)launches the process with the current config, run on the engine's own execution
+     * thread — reached both from a Restart flow-in arrival and, via {@link #beginProcessing()},
+     * from the Start button (see {@link #start()}). Either way this is what resolves
+     * {@link #directoryInput} from a wired edge before reading it, so a freshly-wired Create
+     * Folder node is picked up correctly. A misconfigured node (no directory/command yet) or a
+     * spawn failure throws, which the engine surfaces as this node's error for
+     * {@link #onExecuted()} to show.
      */
     @Override
     public void process(ProcessContext ctx) {
+        String directory = directoryInput.getValue();
         if (directory == null || directory.isBlank()) {
             throw new IllegalStateException("No Node project directory configured");
         }
@@ -96,12 +98,13 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         try {
             server.start(Path.of(directory), command, resourceName, port);
         } catch (IOException e) {
-            throw new RuntimeException("Node server restart failed for " + resourceName, e);
+            throw new RuntimeException("Node server start failed for " + resourceName, e);
         }
     }
 
     @Override
     public void configureInputs() {
+        addInput(directoryInput);
     }
 
     @Override
@@ -117,9 +120,6 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     public Map<String, String> saveState() {
         Map<String, String> state = new HashMap<>();
         state.put("name", resourceName);
-        if (directory != null) {
-            state.put("directory", directory);
-        }
         state.put("command", command);
         state.put("port", Integer.toString(port));
         return state;
@@ -131,7 +131,13 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         if (name != null && !name.isBlank()) {
             resourceName = name;
         }
-        directory = emptyToNull(state.get("directory"));
+        // Pre-input-port saves kept the directory in this custom state map; migrate it onto the
+        // new "Directory" input so an old graph doesn't lose it (applyValues() no-ops afterward
+        // for such a save, since its "inputs" array has no entry for a port that didn't exist yet).
+        String legacyDirectory = emptyToNull(state.get("directory"));
+        if (legacyDirectory != null) {
+            directoryInput.setValue(legacyDirectory);
+        }
         String savedCommand = state.get("command");
         if (savedCommand != null && !savedCommand.isBlank()) {
             command = savedCommand;
@@ -151,10 +157,11 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
     }
 
     /**
-     * Reflects a Restart flow-in firing in the same status label/buttons the Start/Stop path
-     * drives. Only that path runs through {@code process()} — a button click calls {@link #start}/
-     * {@link #stop} directly — so this only ever fires for a flow-triggered restart. Reached on
-     * the FX thread (the engine's callback executor); a no-op if the node's UI was never built.
+     * Reflects a {@code process()} pass finishing in the status label/buttons — reached both from
+     * a Restart flow-in arrival and from the Start button, which now runs through
+     * {@link #beginProcessing()} too (see {@link #start()}), so both share this one feedback path.
+     * Reached on the FX thread (the engine's callback executor); a no-op if the node's UI was
+     * never built.
      */
     @Override
     protected void onExecuted() {
@@ -163,7 +170,11 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         }
         Throwable error = getLastError();
         if (error != null) {
-            statusLabel.setText("Restart failed — " + error.getMessage());
+            statusLabel.setText("Failed — " + error.getMessage());
+            setEditingLocked(false);
+            startButton.setDisable(false);
+            stopButton.setDisable(true);
+            copyUrlButton.setDisable(true);
             return;
         }
         statusLabel.setText("Running at " + server.url());
@@ -178,10 +189,6 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         nameField = new TextField(resourceName);
         nameField.setPromptText("Server name (→ name.local)");
         nameField.textProperty().addListener((obs, old, value) -> rename(value));
-
-        directoryField = new TextField(directory == null ? "" : directory);
-        directoryField.setPromptText("Node project directory…");
-        directoryField.textProperty().addListener((obs, old, value) -> directory = emptyToNull(value));
 
         commandField = new TextField(command);
         commandField.setPromptText("Start command (e.g. npm start)");
@@ -210,7 +217,7 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, directoryField, commandField, portField, buttons, copyUrlButton, statusLabel);
+        return new VBox(4, nameField, commandField, portField, buttons, copyUrlButton, statusLabel);
     }
 
     private void rename(String newName) {
@@ -219,38 +226,18 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
         ResourceRegistry.shared().register(resourceName, server);
     }
 
+    /**
+     * Runs {@link #process()} via {@link #beginProcessing()} on a background thread, which
+     * resolves {@link #directoryInput} from any wired edge before (re)launching the process —
+     * the same path {@code Restart} uses. UI feedback is left to {@link #onExecuted()}, which the
+     * engine calls once the pass finishes either way.
+     */
     private void start() {
-        if (directory == null || directory.isBlank()) {
-            statusLabel.setText("Pick a Node project directory first");
-            return;
-        }
-        if (command == null || command.isBlank()) {
-            statusLabel.setText("Enter a start command first");
-            return;
-        }
-        Path root = Path.of(directory);
-        String startCommand = command;
         setEditingLocked(true);
         startButton.setDisable(true);
         statusLabel.setText("Starting…");
 
-        Thread thread = new Thread(() -> {
-            try {
-                server.start(root, startCommand, resourceName, port);
-                Platform.runLater(() -> {
-                    statusLabel.setText("Running at " + server.url());
-                    stopButton.setDisable(false);
-                    copyUrlButton.setDisable(false);
-                });
-            } catch (Exception ex) {
-                log.error("Node server start failed: {}", ex);
-                Platform.runLater(() -> {
-                    statusLabel.setText("Start failed — " + ex.getMessage());
-                    setEditingLocked(false);
-                    startButton.setDisable(false);
-                });
-            }
-        }, "node-server-" + resourceName);
+        Thread thread = new Thread(this::beginProcessing, "node-server-" + resourceName);
         thread.setDaemon(true);
         thread.start();
     }
@@ -277,7 +264,6 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider {
 
     private void setEditingLocked(boolean locked) {
         nameField.setDisable(locked);
-        directoryField.setDisable(locked);
         commandField.setDisable(locked);
         portField.setDisable(locked);
     }

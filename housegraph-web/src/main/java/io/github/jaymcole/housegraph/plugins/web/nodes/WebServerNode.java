@@ -38,9 +38,10 @@ import java.util.Map;
  * other nodes can find it, and its liveness is user-driven (Start/Stop) rather than tied
  * to graph flow.
  * <p>
- * Configuration — the website name, the directory to serve, and the port — is authored in
- * the node's inline UI and persisted via {@link #saveState()} (a directory path, never the
- * files themselves; the site is served live from wherever it lives on disk). The actual
+ * Configuration — the website name and the port — is authored in the node's inline UI and
+ * persisted via {@link #saveState()}; the directory to serve is a data input ({@code Directory}),
+ * typed in directly or wired from an upstream node (e.g. a Create Folder node's output), and
+ * persisted as an ordinary port value rather than through {@link #saveState()}. The actual
  * bind + mDNS advertisement runs off the UI thread so the app stays responsive, and is
  * torn down on {@link #onRemoved()} (node deleted or app shutdown).
  * <p>
@@ -55,16 +56,17 @@ import java.util.Map;
  * rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses Start for the
  * user once the graph (including the {@code Store} edge) is fully loaded (see {@link AutoStartable}).
  * <p>
- * Files are served straight off disk, so an edit that lands directly in {@code directory} — a hand
- * -authored HTML/CSS/JS site, say — shows up on the very next request with nothing further needed.
- * A site built from source (a React app compiled to {@code directory} by a bundler) is different:
- * the served files only change when something reruns that build. That's what the <b>Rebuild</b>
- * flow-in is for: wire something's flow-out into it (e.g. {@code housegraph-github}'s Git Sync
- * {@code Pulled} port) to rerun the configured build command whenever new source lands, via
- * {@link io.github.jaymcole.housegraph.plugins.web.SiteBuilder}. It never restarts the HTTP server
- * itself — {@link LocalWebServer} already rereads {@code directory} from disk on every request, so
- * a fresh build is all a rebuild needs to take effect. Leaving the build directory unset (the
- * default) makes Rebuild a no-op: nothing to build, same as leaving the {@code Store} input unwired.
+ * Files are served straight off disk, so an edit that lands directly in the served directory — a
+ * hand-authored HTML/CSS/JS site, say — shows up on the very next request with nothing further
+ * needed. A site built from source (a React app compiled into the served directory by a bundler)
+ * is different: the served files only change when something reruns that build. That's what the
+ * <b>Rebuild</b> flow-in is for: wire something's flow-out into it (e.g. {@code housegraph-github}'s
+ * Git Sync {@code Pulled} port) to rerun the configured build command whenever new source lands,
+ * via {@link io.github.jaymcole.housegraph.plugins.web.SiteBuilder}. It never restarts the HTTP
+ * server itself — {@link LocalWebServer} already rereads the served directory from disk on every
+ * request, so a fresh build is all a rebuild needs to take effect. Leaving the build directory
+ * unset (the default) makes Rebuild a no-op: nothing to build, same as leaving the {@code Store}
+ * input unwired.
  */
 @Display.Name("Web Server")
 @Node.Type("web.WebServerNode")
@@ -80,8 +82,9 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private final NodeVariable<JsonDocumentStore> storeInput =
             new NodeVariable<>("Store", JsonDocumentStore.class);
     private final FlowPort rebuild = new FlowPort("Rebuild", FlowPort.Direction.IN);
+    private final NodeVariable<String> directoryInput =
+            new NodeVariable<>("Directory", String.class, true).required();
     private String resourceName = "housegraph";
-    private String directory;
     private int port = DEFAULT_PORT;
     /** Optional backend to reverse-proxy at {@code /bridge/*} (e.g. {@code http://localhost:3000}); null = none. */
     private String proxyTarget;
@@ -91,11 +94,12 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     /** The store handle captured from the {@code Store} input at Start; null when nothing is wired. */
     private volatile JsonDocumentStore resolvedStore;
+    /** The directory resolved from {@link #directoryInput} at the last {@link #beginProcessing()}; null until Start has run once. */
+    private volatile String resolvedDirectory;
     /** True when the server was running at the moment the loaded graph was saved; drives {@link #autoStartIfWasRunning()}. */
     private boolean wasRunning;
 
     private TextField nameField;
-    private TextField directoryField;
     private TextField buildDirectoryField;
     private TextField buildCommandField;
     private TextField portField;
@@ -108,8 +112,10 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     @Override
     public void process(ProcessContext ctx) {
         // Runs during beginProcessing() at Start, with the run's value overlay bound, so this
-        // is the one place the edge-resolved store handle is readable. Capture it for the server.
+        // is the one place the edge-resolved store handle and directory are readable. Capture
+        // them for the server.
         resolvedStore = storeInput.getValue();
+        resolvedDirectory = directoryInput.getValue();
 
         // Also runs the build step (if configured) — both when beginProcessing() is invoked
         // manually at Start and when the Rebuild flow-in fires, since both paths go through this
@@ -126,6 +132,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     @Override
     public void configureInputs() {
         addInput(storeInput);
+        addInput(directoryInput);
     }
 
     @Override
@@ -152,9 +159,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     public Map<String, String> saveState() {
         Map<String, String> state = new HashMap<>();
         state.put("name", resourceName);
-        if (directory != null) {
-            state.put("directory", directory);
-        }
         state.put("port", Integer.toString(port));
         if (proxyTarget != null) {
             state.put("proxyTarget", proxyTarget);
@@ -175,7 +179,13 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         if (name != null && !name.isBlank()) {
             resourceName = name;
         }
-        directory = emptyToNull(state.get("directory"));
+        // Pre-input-port saves kept the directory in this custom state map; migrate it onto the
+        // new "Directory" input so an old graph doesn't lose it (applyValues() no-ops afterward
+        // for such a save, since its "inputs" array has no entry for a port that didn't exist yet).
+        String legacyDirectory = emptyToNull(state.get("directory"));
+        if (legacyDirectory != null) {
+            directoryInput.setValue(legacyDirectory);
+        }
         port = parsePort(state.get("port"));
         proxyTarget = emptyToNull(state.get("proxyTarget"));
         buildDirectory = emptyToNull(state.get("buildDirectory"));
@@ -232,10 +242,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         nameField.setPromptText("Website name (→ name.local)");
         nameField.textProperty().addListener((obs, old, value) -> rename(value));
 
-        directoryField = new TextField(directory == null ? "" : directory);
-        directoryField.setPromptText("Website directory…");
-        directoryField.textProperty().addListener((obs, old, value) -> directory = emptyToNull(value));
-
         portField = new TextField(Integer.toString(port));
         portField.setPromptText("Port");
         portField.setPrefColumnCount(5);
@@ -271,7 +277,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, directoryField, buildDirectoryField, buildCommandField, portField, proxyField,
+        return new VBox(4, nameField, buildDirectoryField, buildCommandField, portField, proxyField,
                 buttons, copyUrlButton, statusLabel);
     }
 
@@ -282,24 +288,30 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     }
 
     private void start() {
-        if (directory == null || directory.isBlank()) {
-            statusLabel.setText("Pick a website directory first");
-            return;
-        }
-        Path root = Path.of(directory);
         setEditingLocked(true);
         startButton.setDisable(true);
         statusLabel.setText("Starting…");
 
         Thread thread = new Thread(() -> {
             try {
-                // Pull the Store input (if wired) and capture its handle, and run the build step
-                // (if configured), before serving.
+                // Pull the Store and Directory inputs (if wired), capture their resolved values,
+                // and run the build step (if configured) — all via process(), before serving. This
+                // is also what picks up a freshly-wired Create Folder node even on the very first
+                // Start since it was wired.
                 beginProcessing();
                 Throwable buildError = getLastError();
                 if (buildError != null) {
                     throw new RuntimeException(buildError.getMessage(), buildError);
                 }
+                if (resolvedDirectory == null || resolvedDirectory.isBlank()) {
+                    Platform.runLater(() -> {
+                        statusLabel.setText("Pick a website directory first");
+                        setEditingLocked(false);
+                        startButton.setDisable(false);
+                    });
+                    return;
+                }
+                Path root = Path.of(resolvedDirectory);
                 server.start(root, resourceName, port, documentApi(), proxyRoute());
                 Platform.runLater(() -> {
                     statusLabel.setText("Serving at " + server.url());
@@ -387,6 +399,11 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         return resolvedStore;
     }
 
+    /** Test seam: the directory captured from the {@code Directory} input at the last {@link #beginProcessing()}. */
+    String resolvedDirectory() {
+        return resolvedDirectory;
+    }
+
     /** Test seam: whether the loaded graph had this server running, i.e. auto-start is pending. */
     boolean wasRunning() {
         return wasRunning;
@@ -405,7 +422,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     private void setEditingLocked(boolean locked) {
         nameField.setDisable(locked);
-        directoryField.setDisable(locked);
         buildDirectoryField.setDisable(locked);
         buildCommandField.setDisable(locked);
         portField.setDisable(locked);

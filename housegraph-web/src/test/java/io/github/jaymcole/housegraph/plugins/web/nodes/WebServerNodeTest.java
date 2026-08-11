@@ -54,6 +54,30 @@ class WebServerNodeTest {
         }
     }
 
+    /** A minimal data node that outputs a fixed path — stands in for {@code CreateFolderNode}. */
+    private static final class FolderSource extends BaseNode {
+        private final NodeVariable<String> out = new NodeVariable<>("Folder Path", String.class);
+        private final String path;
+
+        FolderSource(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void process(ProcessContext ctx) {
+            out.setValue(path);
+        }
+
+        @Override
+        public void configureInputs() {
+        }
+
+        @Override
+        public void configureOutputs() {
+            addOutput(out);
+        }
+    }
+
     @Test
     void capturesWiredStoreWhenResolved(@TempDir Path dir) {
         NodeGraph graph = new NodeGraph();
@@ -78,6 +102,32 @@ class WebServerNodeTest {
         web.beginProcessing();
 
         assertNull(web.resolvedStore(), "with nothing wired the server serves static-only");
+    }
+
+    @Test
+    void capturesWiredDirectoryWhenResolved(@TempDir Path dir) {
+        NodeGraph graph = new NodeGraph();
+        String folderPath = dir.resolve("site").toString();
+        FolderSource source = new FolderSource(folderPath);
+        WebServerNode web = new WebServerNode();
+        graph.addNode(source);
+        graph.addNode(web);
+        graph.registerEdge(new Edge(source, source.out, web, web.getInputs().get(1)));
+
+        web.beginProcessing();
+
+        assertEquals(folderPath, web.resolvedDirectory(),
+                "web server should capture the directory off its Directory input edge");
+    }
+
+    @Test
+    void legacyDirectoryInSavedStateMigratesOntoTheDirectoryInput() {
+        WebServerNode web = new WebServerNode();
+
+        web.loadState(Map.of("name", "site", "directory", "/srv/site"));
+
+        assertEquals("/srv/site", web.getInputs().get(1).getValue(),
+                "a pre-input-port save's directory should land on the new Directory input");
     }
 
     @Test
