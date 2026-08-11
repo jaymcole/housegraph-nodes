@@ -103,12 +103,14 @@ version stamp; without it, every library falls back to `0.1.0` (see the root `bu
 
 ## Releasing
 
-```bash
-git tag v0.3.0
-git push --tags
-```
+Releasing is automatic: merging a pull request into `main` triggers
+`.github/workflows/auto-tag.yml`, which tags the resulting commit `v<major>.<minor>.<patch>`,
+bumping the patch number by default. Put `#minor` or `#major` anywhere in the PR title to bump
+one of those instead (and reset the parts below it to zero) — e.g. a title of `Add Foo node
+#minor` bumps the minor version.
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
+Pushing a `v*` tag — whether from `auto-tag.yml` or manually — triggers
+`.github/workflows/release.yml`, which:
 
 1. Checks out, sets up JDK 21.
 2. Runs `./gradlew build -Pversion=<tag without the v>` — builds and tests every library at that
