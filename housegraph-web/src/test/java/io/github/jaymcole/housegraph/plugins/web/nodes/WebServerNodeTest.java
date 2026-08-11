@@ -12,6 +12,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -19,8 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the web-server node captures the data-store handle off its {@code Store} data edge
- * when it starts — the pull-at-Start wiring that replaced the old name-reference. Uses a
- * synthetic upstream source so it stays headless and off disk.
+ * when it starts — the pull-at-Start wiring that replaced the old name-reference — plus the
+ * shape/guard rails of its Rebuild flow-in. Uses a synthetic upstream source so it stays headless
+ * and off disk (actually running a build command touches the OS, which belongs in a manual/
+ * integration check, not the unit suite — see {@code NodeServerNodeTest}'s Restart tests for the
+ * same reasoning).
  */
 class WebServerNodeTest {
 
@@ -89,5 +94,46 @@ class WebServerNodeTest {
         web.loadState(Map.of("name", "site", "port", "8080", "running", "true"));
 
         assertTrue(web.wasRunning(), "a graph saved while serving reloads with auto-start pending");
+    }
+
+    @Test
+    void declaresARebuildFlowInput() {
+        WebServerNode web = new WebServerNode();
+
+        assertEquals(1, web.getFlowInputs().size());
+        assertEquals("Rebuild", web.getFlowInputs().get(0).name);
+    }
+
+    @Test
+    void rebuildWithNoBuildDirectoryConfiguredIsANoOp() {
+        WebServerNode web = new WebServerNode();
+
+        assertDoesNotThrow(() -> web.process(ProcessContext.uncancelled()),
+                "with no build step configured, Rebuild should do nothing rather than fail — "
+                        + "most sites here are hand-authored, not built from source");
+    }
+
+    @Test
+    void savesAndReloadsBuildConfiguration() {
+        WebServerNode original = new WebServerNode();
+        original.loadState(Map.of(
+                "name", "site",
+                "buildDirectory", "/srv/site-src",
+                "buildCommand", "yarn build"));
+
+        Map<String, String> saved = original.saveState();
+
+        WebServerNode reloaded = new WebServerNode();
+        reloaded.loadState(saved);
+
+        assertEquals("/srv/site-src", saved.get("buildDirectory"));
+        assertEquals("yarn build", saved.get("buildCommand"));
+        assertEquals(saved, reloaded.saveState(), "build config should survive a save/load round-trip unchanged");
+    }
+
+    @Test
+    void aFreshNodeHasNoBuildDirectoryConfigured() {
+        assertFalse(new WebServerNode().saveState().containsKey("buildDirectory"),
+                "a node nobody has pointed at a source project shouldn't persist a build directory");
     }
 }
