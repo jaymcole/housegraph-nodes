@@ -20,11 +20,9 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
-import javafx.stage.DirectoryChooser;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
-import java.io.File;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -81,7 +79,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private TextField directoryField;
     private TextField portField;
     private TextField proxyField;
-    private Button browseButton;
     private Button startButton;
     private Button stopButton;
     private Button copyUrlButton;
@@ -160,9 +157,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         directoryField.setPromptText("Website directory…");
         directoryField.textProperty().addListener((obs, old, value) -> directory = emptyToNull(value));
 
-        browseButton = new Button("Browse…");
-        browseButton.setOnAction(e -> chooseDirectory());
-
         portField = new TextField(Integer.toString(port));
         portField.setPromptText("Port");
         portField.setPrefColumnCount(5);
@@ -189,24 +183,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel = new Label("Stopped");
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
-        HBox dirRow = new HBox(6, directoryField, browseButton);
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, dirRow, portField, proxyField, buttons, copyUrlButton, statusLabel);
-    }
-
-    private void chooseDirectory() {
-        DirectoryChooser chooser = new DirectoryChooser();
-        if (directory != null && !directory.isBlank()) {
-            File current = new File(directory);
-            if (current.isDirectory()) {
-                chooser.setInitialDirectory(current);
-            }
-        }
-        File chosen = chooser.showDialog(browseButton.getScene().getWindow());
-        if (chosen != null) {
-            directory = chosen.getAbsolutePath();
-            directoryField.setText(directory);
-        }
+        return new VBox(4, nameField, directoryField, portField, proxyField, buttons, copyUrlButton, statusLabel);
     }
 
     private void rename(String newName) {
@@ -335,7 +313,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private void setEditingLocked(boolean locked) {
         nameField.setDisable(locked);
         directoryField.setDisable(locked);
-        browseButton.setDisable(locked);
         portField.setDisable(locked);
         proxyField.setDisable(locked);
     }
