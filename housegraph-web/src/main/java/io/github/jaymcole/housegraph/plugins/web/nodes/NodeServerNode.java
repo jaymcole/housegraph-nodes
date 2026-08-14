@@ -90,6 +90,12 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider, Aut
      * Folder node is picked up correctly. A misconfigured node (no directory/command yet) or a
      * spawn failure throws, which the engine surfaces as this node's error for
      * {@link #onExecuted()} to show.
+     * <p>
+     * Stops before it starts, and both halves block: {@link NodeProcessServer} waits for the old
+     * tree to release the port and for the new server to actually accept a connection. That is what
+     * makes a restart survivable — the previous server drains its connections for a few seconds
+     * after being signalled, and spawning into that window used to produce a silent
+     * {@code EADDRINUSE} death that still reported as a successful start.
      */
     @Override
     public void process(ProcessContext ctx) {
@@ -100,9 +106,10 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider, Aut
         if (command == null || command.isBlank()) {
             throw new IllegalStateException("No start command configured");
         }
-        if (server.isRunning()) {
-            server.stop();
-        }
+        // Unconditional, not guarded by isRunning(): that only tracks the launcher shell, so a run
+        // whose server died underneath it would skip teardown and leak its mDNS registration. stop()
+        // is idempotent, and it waits for the port to be released before start() tries to bind it.
+        server.stop();
         try {
             server.start(Path.of(directory), command, resourceName, port);
         } catch (IOException e) {
@@ -261,13 +268,27 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider, Aut
         thread.start();
     }
 
+    /**
+     * Tears the process down on a background thread. {@link NodeProcessServer#stop()} waits for the
+     * child tree to actually exit — several seconds for a server that drains its connections first —
+     * so running it inline would freeze the canvas for the duration. The controls are settled up
+     * front and the status label corrected once teardown returns.
+     */
     private void stop() {
-        server.stop();
-        statusLabel.setText("Stopped");
-        setEditingLocked(false);
-        startButton.setDisable(false);
         stopButton.setDisable(true);
         copyUrlButton.setDisable(true);
+        statusLabel.setText("Stopping…");
+
+        Thread thread = new Thread(() -> {
+            server.stop();
+            javafx.application.Platform.runLater(() -> {
+                statusLabel.setText("Stopped");
+                setEditingLocked(false);
+                startButton.setDisable(false);
+            });
+        }, "node-server-stop-" + resourceName);
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void copyUrl() {
