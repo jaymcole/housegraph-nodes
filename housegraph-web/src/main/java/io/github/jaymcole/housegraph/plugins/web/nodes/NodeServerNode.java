@@ -113,7 +113,12 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider, Aut
         try {
             server.start(Path.of(directory), command, resourceName, port);
         } catch (IOException e) {
-            throw new RuntimeException("Node server start failed for " + resourceName, e);
+            // Carry the cause's message in the text, not just the cause: this is what reaches the
+            // node's status label via getLastError().getMessage(), and what the engine formats into
+            // the log. "start failed for bridge" on its own names the node and says nothing at all
+            // about why — and why is the whole point of failing loudly.
+            throw new RuntimeException("Node server '" + resourceName + "' failed to start: "
+                    + e.getMessage(), e);
         }
     }
 
