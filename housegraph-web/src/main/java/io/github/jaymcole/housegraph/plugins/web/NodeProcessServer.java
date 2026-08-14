@@ -59,6 +59,12 @@ import java.util.Locale;
  * </ul>
  * The mDNS advertisement is registered only once the server is confirmed listening, so an
  * advertisement never outlives the thing it points at.
+ *
+ * <h2>And a net under all of it</h2>
+ * Waiting only helps when the teardown runs at all, and under a supervisor it sometimes cannot —
+ * see {@link SpawnRecord}, which lets a new JVM reap a {@code node} process the previous one failed
+ * to kill. Without it a single missed teardown poisons the port permanently: every later start fails
+ * on {@code EADDRINUSE}, and only a human killing the process by hand recovers it.
  */
 public final class NodeProcessServer {
 
@@ -112,6 +118,8 @@ public final class NodeProcessServer {
     private volatile String url;
     /** The port of the current (or most recent) run, so teardown can name it in a warning. */
     private int lastPort;
+    /** The resource name of the current run, which keys its {@link SpawnRecord}. Null under test. */
+    private String lastName;
 
     /**
      * Spawns {@code command} as a Node.js server rooted at {@code workingDir} and advertises it as
@@ -146,12 +154,18 @@ public final class NodeProcessServer {
         Path base = workingDir.toAbsolutePath().normalize();
 
         synchronized (lock) {
+            // Before anything else: if a previous JVM died without running its teardown, its node
+            // process is still up and still owns this port. Nothing else will ever clean it up.
+            SpawnRecord.reapOrphan(name);
+
             // A previous run may still be draining its connections and holding the port. Spawning
             // into that loses the race silently: the new server dies on EADDRINUSE seconds later,
             // long after start() has returned success.
             requirePortFree(port);
 
             spawnLocked(base, command, port);
+            lastName = name;
+            SpawnRecord.write(name, process, port);
 
             // ProcessBuilder.start() only tells us the shell launched. Wait for something to answer
             // on the port — or for the child to exit, which is how a port clash or a crashed start
@@ -202,6 +216,11 @@ public final class NodeProcessServer {
         if (process != null) {
             throw new IllegalStateException("Node server already running");
         }
+        // Logged before the spawn, not after a successful start: it is the marker that says the port
+        // was free and we got this far, so an absence of [node] output below means the command
+        // produced none rather than that we never reached it.
+        log.info("Spawning `{}` in {} (PORT={})", command, base, port);
+
         ProcessBuilder builder = new ProcessBuilder(shellCommand(command))
                 .directory(base.toFile())
                 .redirectErrorStream(true);
@@ -246,7 +265,15 @@ public final class NodeProcessServer {
      */
     public void stop() {
         synchronized (lock) {
+            // Traced at both ends, and each slow step between, because this runs during app shutdown
+            // under a bounded budget: if it is cut off partway the child survives into the next run
+            // and takes its port with it, and the log is the only way to see how far it got.
+            boolean running = process != null;
+            if (running) {
+                log.info("Stopping Node server on port {}", lastPort);
+            }
             if (jmdns != null) {
+                long start = System.nanoTime();
                 try {
                     jmdns.unregisterAllServices();
                     jmdns.close();
@@ -254,8 +281,12 @@ public final class NodeProcessServer {
                     log.warn("Error closing mDNS: {}", e.getMessage());
                 }
                 jmdns = null;
+                log.debug("mDNS closed in {}ms", (System.nanoTime() - start) / 1_000_000);
             }
             stopProcessLocked();
+            if (running) {
+                log.info("Stopped Node server; port {} is free", lastPort);
+            }
             url = null;
         }
     }
@@ -287,6 +318,12 @@ public final class NodeProcessServer {
                 }
             }
             process = null;
+
+            // The tree is gone, so the record has nothing left to point at. Dropping it here is what
+            // keeps the next start's reap a no-op in the normal case.
+            if (lastName != null) {
+                SpawnRecord.clear(lastName);
+            }
 
             // Finally, wait for the socket itself. See PORT_RELEASE_AFTER_STOP: the caller's next
             // move is usually to bind this port again.
@@ -330,7 +367,48 @@ public final class NodeProcessServer {
     private static void requirePortFree(int port) throws IOException {
         if (!awaitPortFree(port, PORT_RELEASE_TIMEOUT)) {
             throw new IOException("Port " + port + " is still in use after "
-                    + PORT_RELEASE_TIMEOUT.toSeconds() + "s; another process is holding it");
+                    + PORT_RELEASE_TIMEOUT.toSeconds() + "s; held by " + describePortHolder(port));
+        }
+    }
+
+    /**
+     * Best-effort description of whatever is listening on {@code port}, for the message that reports
+     * the port busy.
+     *
+     * <p>"Another process is holding it" is a dead end for whoever reads the log — the useful
+     * question is <em>which</em>, because an orphaned {@code node} left by the previous run and an
+     * unrelated program that happens to want the port call for opposite fixes. There is no portable
+     * Java answer, so this shells out to {@code lsof} and degrades to a plain phrase when that is not
+     * available (Windows, or a stripped-down box). Never throws: a diagnostic that can fail the
+     * operation it is diagnosing is worse than no diagnostic.
+     *
+     * @param port the port to look up
+     * @return something to put after "held by"
+     */
+    private static String describePortHolder(int port) {
+        if (IS_WINDOWS) {
+            return "another process (run `netstat -ano | findstr :" + port + "` to identify it)";
+        }
+        try {
+            Process lsof = new ProcessBuilder("lsof", "-nP", "-iTCP:" + port, "-sTCP:LISTEN")
+                    .redirectErrorStream(true)
+                    .start();
+            String output = new String(lsof.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!lsof.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                lsof.destroyForcibly();
+                return "another process (lsof timed out)";
+            }
+            String detail = output.lines()
+                    .skip(1) // the COMMAND/PID/... header
+                    .findFirst()
+                    .map(String::trim)
+                    .orElse("");
+            return detail.isEmpty() ? "another process (lsof found no listener)" : detail;
+        } catch (IOException e) {
+            return "another process (lsof unavailable: " + e.getMessage() + ")";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "another process";
         }
     }
 
