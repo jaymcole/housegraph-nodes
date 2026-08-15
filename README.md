@@ -74,19 +74,15 @@ release carries several.
 
 ## Rules worth knowing before they bite
 
-- **Never `implementation` the API.** The host supplies `housegraph-api` and its transitive
-  `org.json` / `slf4j-api`. Bundling the api gives your library its own `BaseNode`, so every node
-  in it fails the host's `isAssignableFrom` check during discovery and **never appears**, with
-  nothing in the log to explain why. Bundling `slf4j-api` gives a second logging binding with no
-  outputs attached, so all your logging silently vanishes. HouseGraph's installer rejects a jar
-  containing either. The convention plugin already gets this right — don't override it.
-- **Always `@Node.Type`, prefixed with your library id.** It pins the id your node is written
-  under in save files. Without it, renaming or moving the class strands every saved graph using it.
-- **A node's static initializer runs at first instantiation, not at discovery** — the host loads
-  classes with `initialize = false`. So a `ValueEditors.register(...)` in a static block only takes
-  effect once one of your nodes exists.
-- **`onExecuted()` reaches you on the JavaFX thread**, so your UI code needs no `Platform.runLater`.
-  Work *you* start does.
+The rules every out-of-tree node library needs — `compileOnly` the API (never `implementation`),
+always `@Node.Type` prefixed with your library id, static-initializer timing, and which thread
+`onExecuted()` reaches you on — are documented once, canonically, in HouseGraph's own docs rather
+than here:
+[`docs/architecture/plugins.md`](https://github.com/jaymcole/HouseGraph/blob/main/docs/architecture/plugins.md#consuming-housegraph-api)
+and
+[`docs/architecture/ui.md`](https://github.com/jaymcole/HouseGraph/blob/main/docs/architecture/ui.md).
+Read those before adding a library here — the convention plugin (below) already gets the
+build-time half of this right, so you mostly need to know *why*.
 
 ## Building
 
