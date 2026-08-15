@@ -6,34 +6,27 @@ to get right when adding or changing a node — not build mechanics.
 
 ## Node design: control, action, data, resource
 
-A node should almost always fit **one** of four shapes. Fusing two into one class is the most
-common design mistake in this repo — picking the right shape up front keeps a node reusable and
-directly testable.
+A node should almost always fit **one** of four shapes — Control, Action, Data, Resource. Fusing
+two into one class is the most common design mistake in this repo. The shapes themselves, and
+why each is defined the way it is, are documented once in HouseGraph itself:
+[`docs/architecture/nodes.md`](https://github.com/jaymcole/HouseGraph/blob/main/docs/architecture/nodes.md#node-roles-control-action-data-resource)
+— read that first. Quick reference, with this repo's own examples:
 
-- **Control** nodes shape *when* and *how often* flow moves: a trigger, a timer, a branch, a
-  loop, a join. Their job is deciding whether/when something downstream runs — not doing that
-  something themselves. (HouseGraph's built-in library ships several of these — a plain trigger
-  button, a repeating timer trigger, an `If`, a `ForEach` — so a library here rarely needs to
-  reinvent one.)
-- **Action** nodes *do* something: call an API, read a sensor, write a file, transform data.
-  Always a flow-in and a flow-out; the flow-out exists only to report that the node ran and, at
-  most, which of a small number of known outcomes happened for *that one run* — not to decide
-  independently when to run again. This is the shape for a node that calls into a resource, too:
-  `DiscordSendMessageNode` looks up the bot via `ResourceRegistry.find`, but is itself
-  Action-shaped — one flow-in, one flow-out. `SquirrelAlarmNode`, `CameraSnapshotNode`,
+- **Control** — a trigger, a timer, a branch, a loop, a join. HouseGraph's built-in library
+  already ships the common ones (a plain trigger button, a repeating timer trigger, an `If`, a
+  `ForEach`), so a library here rarely needs to reinvent one.
+- **Action** — flow-in and flow-out, does the work, reports the outcome. This is the shape for a
+  node that calls into a resource, too: `DiscordSendMessageNode` looks up the bot via
+  `ResourceRegistry.find`, but is itself Action-shaped. `SquirrelAlarmNode`, `CameraSnapshotNode`,
   `CameraMotionStatusNode`, and `DiscoverCamerasNode` are the same shape.
-- **Data** nodes have no flow ports at all. They exist purely to be pulled: one or more data
-  outputs, computed or fetched on demand, nothing to trigger and nothing to report.
-  `CreateFolderNode` (`housegraph-filesystem`) is the canonical example — its Javadoc spells out
-  the pattern.
-- **Resource** nodes front a long-lived object registered in `ResourceRegistry` — see
+- **Data** — no flow ports at all, pulled on demand. `CreateFolderNode` (`housegraph-filesystem`)
+  is the canonical example — its Javadoc spells out the pattern.
+- **Resource** — fronts a long-lived object registered in `ResourceRegistry` — see
   `AutoStartable` and `NodeContentProvider` in `housegraph-api`. Its flow shape follows the
-  registered object's lifecycle rather than the Control/Action pattern, and varies more than the
-  other three on purpose: `DiscordBotNode` has no flow ports at all (pure Start/Stop, driven by
-  its own UI); `WebServerNode`/`NodeServerNode` take a flow-in (`Rebuild`/`Restart`) with no
-  flow-out, ending the branch there; `DiscordCommandNode`/`DiscordSlashCommandNode` have a
-  flow-out and no flow-in, since they start a branch when Discord fires the command. A one-sided
-  flow shape is normal for this category, not a smell — it's a smell only for Action nodes.
+  registered object's lifecycle: `DiscordBotNode` has no flow ports at all (pure Start/Stop,
+  driven by its own UI); `WebServerNode`/`NodeServerNode` take a flow-in (`Rebuild`/`Restart`)
+  with no flow-out, ending the branch there; `DiscordCommandNode`/`DiscordSlashCommandNode` have
+  a flow-out and no flow-in, since they start a branch when Discord fires the command.
 
 **Why the Control/Action split matters, concretely:** `housegraph-github`'s `GitSyncNode`
 originally owned both — its own `Start`/`Stop` timer *and* the git sync itself, in one class. That
