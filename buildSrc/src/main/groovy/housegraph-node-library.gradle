@@ -27,7 +27,18 @@ nodeLibrary.description.convention('')
 nodeLibrary.categoryPrefix.convention(nodeLibrary.id.map { it.replaceFirst('^housegraph-', '') })
 
 def houseGraphApi = providers.gradleProperty('houseGraphApi').get()
-def houseGraphApiVersion = providers.gradleProperty('houseGraphApiVersion').get()
+
+// Derived from the coordinate above, never declared separately. The dependency is what javac
+// actually compiles against, so it is the only value that cannot be wrong; a hand-maintained
+// second copy is just a chance to disagree with it — and it did, drifting from "0.2" to "0.3.0"
+// while the coordinate went v0.2.0 -> v0.3.0.
+//
+// Takes everything after the last colon and drops a leading "v", so com.github.jaymcole:HouseGraph:v0.3.0
+// records 0.3.0. A coordinate pinned to a branch or commit instead of a tag records that verbatim
+// (e.g. "main-SNAPSHOT"), which is the honest answer to "what was this built against?" even though
+// it isn't a version number.
+def houseGraphApiVersion = houseGraphApi.substring(houseGraphApi.lastIndexOf(':') + 1)
+        .replaceFirst(/^v/, '')
 
 repositories {
     mavenCentral()

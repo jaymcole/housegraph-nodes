@@ -28,7 +28,8 @@ import java.util.Map;
  * like {@code npm start} runs) from a chosen project directory and advertises it on the LAN at
  * {@code http://<name>.local:<port>/}. The Node-flavoured sibling of {@link WebServerNode}: same
  * long-lived-resource lifecycle (register under a name, user-driven Start/Stop off the UI thread,
- * torn down in {@link #onRemoved()}), but hosting is delegated to a child process instead of the
+ * torn down across {@link #onRemoved()} and {@link #releaseResources()}), but hosting is delegated
+ * to a child process instead of the
  * JVM's built-in HTTP server. It backs a {@link NodeProcessServer} rather than a
  * {@code LocalWebServer}.
  * <p>
@@ -181,9 +182,24 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider, Aut
         ResourceRegistry.shared().register(resourceName, server);
     }
 
+    /**
+     * The fast half of teardown. Deregistering is a map write; it belongs here precisely because it
+     * costs nothing, and doing it first means nothing can look the server up while it is going down.
+     */
     @Override
     protected void onRemoved() {
         ResourceRegistry.shared().unregister(resourceName);
+    }
+
+    /**
+     * The slow half: signal the process tree, wait for it to go, wait for the port. Ten seconds in
+     * the worst case, which is exactly why it cannot stay in {@link #onRemoved()} — that runs on the
+     * shutdown thread with no limit on it, so this used to be able to outlast the app's whole budget
+     * and get the JVM killed mid-teardown, orphaning the very process it was reaping. Here it runs
+     * on a worker under the engine's per-node limit, alongside every other node's.
+     */
+    @Override
+    protected void releaseResources() {
         server.stop();
     }
 

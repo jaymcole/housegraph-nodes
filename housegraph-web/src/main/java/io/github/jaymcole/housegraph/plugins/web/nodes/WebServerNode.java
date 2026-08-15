@@ -43,7 +43,8 @@ import java.util.Map;
  * typed in directly or wired from an upstream node (e.g. a Create Folder node's output), and
  * persisted as an ordinary port value rather than through {@link #saveState()}. The actual
  * bind + mDNS advertisement runs off the UI thread so the app stays responsive, and is
- * torn down on {@link #onRemoved()} (node deleted or app shutdown).
+ * torn down when the node is deleted or the app shuts down — the registry entry in
+ * {@link #onRemoved()}, the socket and mDNS advertisement in {@link #releaseResources()}.
  * <p>
  * To give the hosted site shared, persisted storage, wire a {@code DataStoreNode}'s output
  * into this node's <b>Store</b> data input; the server then exposes it at {@code /api/data}.
@@ -231,9 +232,19 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         ResourceRegistry.shared().register(resourceName, server);
     }
 
+    /** The fast half of teardown — see {@link #releaseResources()} for the rest. */
     @Override
     protected void onRemoved() {
         ResourceRegistry.shared().unregister(resourceName);
+    }
+
+    /**
+     * The slow half: closing the HTTP server's executor and withdrawing the mDNS advertisement both
+     * wait on the network, so they run here — on a worker under the engine's per-node limit — rather
+     * than on the unbounded shutdown thread where they would delay every node behind them.
+     */
+    @Override
+    protected void releaseResources() {
         server.stop();
     }
 

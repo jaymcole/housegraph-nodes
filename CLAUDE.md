@@ -45,7 +45,7 @@ precedent for fusing scheduling into an ordinary action node.
 yourself if the change warrants it — don't leave it to default to patch:
 
 - `#major` — a breaking change: an existing node's ports, id, or saved-graph-visible behavior
-  change incompatibly, or `houseGraphApiVersion` bumps to a new major.
+  change incompatibly, or `houseGraphApi` moves to a new API major.
 - `#minor` — a backwards-compatible addition: a new node, a new library, a new port on an
   existing node that doesn't change what old graphs do.
 - *(no tag)* — a fix, refactor, docs change, or anything else that doesn't add or break public
