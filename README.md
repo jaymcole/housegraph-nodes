@@ -37,9 +37,11 @@ one repository, one library, independently versioned.
 
 ## Adding a library here
 
-Before designing a node's ports, see [`CLAUDE.md`](CLAUDE.md#node-design-control-vs-action) — in
-short, a node should almost always be either control-oriented (a trigger/timer/branch/loop) or
-action-oriented (does a thing, reports the outcome), not both.
+Before designing a node's ports, see
+[`CLAUDE.md`](CLAUDE.md#node-design-control-action-data-resource) — in short, a node should
+almost always fit one of four shapes: control (a trigger/timer/branch/loop), action (does a
+thing, reports the outcome), data (no flow ports, pulled on demand), or resource (fronts a
+long-lived object in `ResourceRegistry`).
 
 ```
 settings.gradle              include 'housegraph-yourthing'
