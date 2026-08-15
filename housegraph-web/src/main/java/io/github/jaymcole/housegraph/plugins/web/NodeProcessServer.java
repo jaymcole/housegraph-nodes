@@ -259,9 +259,10 @@ public final class NodeProcessServer {
     /**
      * Idempotent teardown of both the mDNS advertisement and the child process (whole tree).
      *
-     * <p>Blocks until the process tree has actually exited — see the class notes. Callers on the FX
-     * thread should hand this to a background thread; {@code onRemoved()} is the exception, because
-     * app shutdown must not race ahead of it.
+     * <p>Blocks until the process tree has actually exited and the mDNS goodbye has been sent — see
+     * the class notes. The two run concurrently, since neither depends on the other. Callers on the
+     * FX thread should hand this to a background thread; {@code releaseResources()} already does,
+     * which is where app shutdown reaches it.
      */
     public void stop() {
         synchronized (lock) {
@@ -272,23 +273,49 @@ public final class NodeProcessServer {
             if (running) {
                 log.info("Stopping Node server on port {}", lastPort);
             }
-            if (jmdns != null) {
-                long start = System.nanoTime();
-                try {
-                    jmdns.unregisterAllServices();
-                    jmdns.close();
-                } catch (IOException e) {
-                    log.warn("Error closing mDNS: {}", e.getMessage());
-                }
-                jmdns = null;
-                log.debug("mDNS closed in {}ms", (System.nanoTime() - start) / 1_000_000);
-            }
+            // The two halves are independent — withdrawing a DNS record has nothing to do with the
+            // child being dead — and both are almost entirely waiting. Overlapping them makes stop()
+            // cost the slower of the two rather than their sum: jmdns's goodbye is ~2s and the
+            // process teardown a few seconds more, so this is worth the one extra thread.
+            JmDNS closing = jmdns;
+            jmdns = null;
+            Thread mdnsCloser = closing == null ? null
+                    : Thread.ofVirtual().name("node-server-mdns-close").start(() -> closeMdns(closing));
+
             stopProcessLocked();
+
+            if (mdnsCloser != null) {
+                try {
+                    // Joined rather than left running: stop() promises that when it returns, this
+                    // server is fully gone. A goodbye still in flight would outlive the node.
+                    mdnsCloser.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             if (running) {
                 log.info("Stopped Node server; port {} is free", lastPort);
             }
             url = null;
         }
+    }
+
+    /**
+     * Withdraws the mDNS advertisement. Run on its own thread by {@link #stop()}, so it must touch
+     * nothing but the instance handed to it.
+     *
+     * @param dns the registration to close
+     */
+    private static void closeMdns(JmDNS dns) {
+        long start = System.nanoTime();
+        try {
+            // close() only — it calls unregisterAllServices() itself, so doing both paid jmdns's
+            // goodbye-and-wait twice (measured: 2.0s each). See LocalWebServer.
+            dns.close();
+        } catch (IOException e) {
+            log.warn("Error closing mDNS: {}", e.getMessage());
+        }
+        log.debug("mDNS closed in {}ms", (System.nanoTime() - start) / 1_000_000);
     }
 
     private void stopProcessLocked() {

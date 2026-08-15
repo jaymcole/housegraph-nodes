@@ -156,7 +156,11 @@ public final class LocalWebServer {
         synchronized (lock) {
             if (jmdns != null) {
                 try {
-                    jmdns.unregisterAllServices();
+                    // close() only — it calls unregisterAllServices() itself. Calling it explicitly
+                    // first paid jmdns's goodbye-and-wait twice: measured at 2.0s each, so 4.0s of
+                    // teardown where 2.0s does the same job. The remaining wait is jmdns announcing
+                    // the service is gone, which is worth keeping — without it the record lingers in
+                    // other machines' caches until its TTL expires.
                     jmdns.close();
                 } catch (IOException e) {
                     log.warn("Error closing mDNS: {}", e.getMessage());
