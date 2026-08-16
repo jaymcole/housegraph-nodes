@@ -74,19 +74,16 @@ release carries several.
 
 ## Rules worth knowing before they bite
 
-- **Never `implementation` the API.** The host supplies `housegraph-api` and its transitive
-  `org.json` / `slf4j-api`. Bundling the api gives your library its own `BaseNode`, so every node
-  in it fails the host's `isAssignableFrom` check during discovery and **never appears**, with
-  nothing in the log to explain why. Bundling `slf4j-api` gives a second logging binding with no
-  outputs attached, so all your logging silently vanishes. HouseGraph's installer rejects a jar
-  containing either. The convention plugin already gets this right — don't override it.
-- **Always `@Node.Type`, prefixed with your library id.** It pins the id your node is written
-  under in save files. Without it, renaming or moving the class strands every saved graph using it.
-- **A node's static initializer runs at first instantiation, not at discovery** — the host loads
-  classes with `initialize = false`. So a `ValueEditors.register(...)` in a static block only takes
-  effect once one of your nodes exists.
-- **`onExecuted()` reaches you on the JavaFX thread**, so your UI code needs no `Platform.runLater`.
-  Work *you* start does.
+**→ [`docs/shared/node-library-rules.md`](docs/shared/node-library-rules.md)** — the build
+rules, the API surface, node design, and the trust note. Every rule there has a *silent* failure
+mode: a node that never appears, logging that vanishes, a saved graph that can't find its nodes.
+
+That file is maintained in
+[HouseGraph](https://github.com/jaymcole/HouseGraph/blob/main/docs/shared/node-library-rules.md)
+and synced here, so all three repositories teach the same thing. **Don't edit the copy in this
+repository** — the next sync overwrites it.
+
+The convention plugin already implements every build rule on that page. Don't override it.
 
 ## Building
 
@@ -117,13 +114,16 @@ Pushing a `v*` tag — whether from `auto-tag.yml` or manually — triggers
    version.
 3. Attaches every library's `*-all.jar` to a GitHub Release, with auto-generated release notes.
 
-Because versioning is lockstep (see above), one tag releases all five libraries at that version
+Because versioning is lockstep (see above), one tag releases every library at that version
 number, even if only one of them actually changed.
 
-**The jar naming is load-bearing, not cosmetic.** A release carries five jars; HouseGraph's
-installer matches `<pluginId>-<version>-all.jar` to pick the right one. Don't rename these
-manually, and don't hand-edit `shadowJar { archiveBaseName = ... }` in a library's `build.gradle` —
-it's already correct via the convention plugin.
+**The jar naming is load-bearing, not cosmetic.** A release carries one jar per library;
+HouseGraph's installer matches `<pluginId>-<version>-all.jar` to pick the right one. Don't rename
+these manually, and don't hand-edit `shadowJar { archiveBaseName = ... }` in a library's
+`build.gradle` — it's already correct via the convention plugin.
+
+A docs sync from HouseGraph does **not** cut a release: `auto-tag.yml` ignores
+`docs/shared/**`.
 
 ## License
 

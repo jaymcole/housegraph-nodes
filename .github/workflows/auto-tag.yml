@@ -9,6 +9,10 @@ name: Auto Tag
 on:
   push:
     branches: [main]
+    paths-ignore:
+      # Synced verbatim from HouseGraph by its sync-docs workflow. Without this, every
+      # documentation edit there would tag and release a new version of every library here.
+      - 'docs/shared/**'
 
 permissions:
   contents: write
