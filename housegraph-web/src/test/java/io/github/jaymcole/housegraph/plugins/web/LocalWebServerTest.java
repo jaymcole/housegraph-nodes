@@ -1,5 +1,7 @@
 package io.github.jaymcole.housegraph.plugins.web;
 
+import io.github.jaymcole.housegraph.resource.ResourceRegistry;
+import io.github.jaymcole.housegraph.resource.Subscription;
 import io.github.jaymcole.housegraph.store.JsonDocumentStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -19,8 +21,12 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -38,12 +44,14 @@ class LocalWebServerTest {
         server.stop();
     }
 
+    private static final String SERVER_NAME = "test";
+
     private void serve(Path root) throws IOException {
-        port = server.startHttpForTest(root, 0, null);
+        port = server.startHttpForTest(root, SERVER_NAME, 0, null);
     }
 
     private void serve(Path root, DocumentApi api) throws IOException {
-        port = server.startHttpForTest(root, 0, api);
+        port = server.startHttpForTest(root, SERVER_NAME, 0, api);
     }
 
     @Test
@@ -156,13 +164,103 @@ class LocalWebServerTest {
         assertEquals("<h1>hi</h1>", body(get("/")));
     }
 
+    // --- /hooks/* dispatch (Web Hook / Web Hook Request nodes) -----------------------------
+
+    @Test
+    void hookRouteNotDeclaredIs404(@TempDir Path site) throws IOException {
+        Files.writeString(site.resolve("index.html"), "hi");
+        serve(site);
+
+        HttpURLConnection conn = get("/hooks/nothing-here");
+        assertEquals(404, conn.getResponseCode());
+    }
+
+    @Test
+    void fireAndForgetHookRespondsImmediatelyAndPublishesEvent(@TempDir Path site) throws IOException, InterruptedException {
+        Files.writeString(site.resolve("index.html"), "hi");
+        serve(site);
+        RouteRegistry.shared().declare(SERVER_NAME, new WebHookRoute("/doorbell", "POST", false, 5));
+        BlockingQueue<WebHookEvent> received = new ArrayBlockingQueue<>(1);
+        Subscription subscription = ResourceRegistry.shared().subscribe(SERVER_NAME, payload -> {
+            if (payload instanceof WebHookEvent event) {
+                received.add(event);
+            }
+        });
+        try {
+            HttpURLConnection conn = sendWithHeader("POST", "/hooks/doorbell?ring=1", "X-Signal", "chime", "{\"note\":\"hi\"}");
+            assertEquals(202, conn.getResponseCode());
+
+            WebHookEvent event = received.poll(2, TimeUnit.SECONDS);
+            assertEquals("POST", event.method());
+            assertEquals("/doorbell", event.path());
+            assertEquals("{\"note\":\"hi\"}", event.body());
+            assertEquals("1", event.query().get("ring"));
+            assertEquals("chime", event.headers().get("X-Signal"));
+            assertEquals("chime", event.headers().get("x-signal"), "header lookup should be case-insensitive");
+            assertNull(event.reply(), "a fire-and-forget route's event carries no reply handle");
+        } finally {
+            subscription.cancel();
+            RouteRegistry.shared().withdraw(SERVER_NAME, "POST", "/doorbell");
+        }
+    }
+
+    @Test
+    void holdAndReplyHookAnswersWithWhatTheSubscriberReplied(@TempDir Path site) throws IOException {
+        Files.writeString(site.resolve("index.html"), "hi");
+        serve(site);
+        RouteRegistry.shared().declare(SERVER_NAME, new WebHookRoute("/ask", "POST", true, 5));
+        Subscription subscription = ResourceRegistry.shared().subscribe(SERVER_NAME, payload -> {
+            if (payload instanceof WebHookEvent event) {
+                // Reply from another thread, like a graph run proceeding on a background thread would.
+                new Thread(() -> event.reply().reply(201, "text/plain; charset=utf-8", "created")).start();
+            }
+        });
+        try {
+            HttpURLConnection conn = send("POST", "/hooks/ask", "{}");
+            assertEquals(201, conn.getResponseCode());
+            assertEquals("created", body(conn));
+        } finally {
+            subscription.cancel();
+            RouteRegistry.shared().withdraw(SERVER_NAME, "POST", "/ask");
+        }
+    }
+
+    @Test
+    void holdAndReplyHookTimesOutWithNoReply(@TempDir Path site) throws IOException {
+        Files.writeString(site.resolve("index.html"), "hi");
+        serve(site);
+        // A one-second timeout keeps the test fast; nobody replies, so it must elapse and answer 504.
+        RouteRegistry.shared().declare(SERVER_NAME, new WebHookRoute("/silent", "POST", true, 1));
+        try {
+            HttpURLConnection conn = send("POST", "/hooks/silent", "{}");
+            assertEquals(504, conn.getResponseCode());
+        } finally {
+            RouteRegistry.shared().withdraw(SERVER_NAME, "POST", "/silent");
+        }
+    }
+
+    private HttpURLConnection sendWithHeader(String method, String path, String header, String headerValue,
+                                              String requestBody) throws IOException {
+        URI uri = URI.create("http://localhost:" + port + path);
+        HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+        conn.setRequestMethod(method);
+        conn.setRequestProperty(header, headerValue);
+        if (requestBody != null) {
+            conn.setDoOutput(true);
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(requestBody.getBytes(StandardCharsets.UTF_8));
+            }
+        }
+        return conn;
+    }
+
     @Test
     void proxyForwardsToBackendStrippingPrefixAndRelaysResponse(@TempDir Path site) throws IOException {
         Files.writeString(site.resolve("index.html"), "<h1>hi</h1>");
         HttpServer backend = startBackend("/devices", "application/json", "{\"count\":1}");
         int backendPort = backend.getAddress().getPort();
         try {
-            port = server.startHttpForTest(site, 0, null,
+            port = server.startHttpForTest(site, SERVER_NAME, 0, null,
                     new LocalWebServer.ProxyRoute("/bridge", URI.create("http://localhost:" + backendPort)));
 
             HttpURLConnection conn = get("/bridge/devices");
@@ -182,7 +280,7 @@ class LocalWebServerTest {
     void proxyReturns502WhenBackendUnreachable(@TempDir Path site) throws IOException {
         Files.writeString(site.resolve("index.html"), "hi");
         // Port 1 has nothing listening: the forward fails fast → 502, not a hang.
-        port = server.startHttpForTest(site, 0, null,
+        port = server.startHttpForTest(site, SERVER_NAME, 0, null,
                 new LocalWebServer.ProxyRoute("/bridge", URI.create("http://localhost:1")));
 
         assertEquals(502, get("/bridge/devices").getResponseCode());

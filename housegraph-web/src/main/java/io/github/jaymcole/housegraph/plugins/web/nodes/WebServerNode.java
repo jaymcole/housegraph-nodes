@@ -78,6 +78,12 @@ import java.util.Map;
  * on every request, so a fresh build is all it takes to serve the update. Clear
  * {@code buildCommand} to opt out for a project with no build step (nothing to build, same as
  * leaving the {@code Store} input unwired).
+ * <p>
+ * {@code /hooks/*} is always mounted, independent of anything wired into this node — it's where
+ * {@code WebHookNode} and {@code WebHookRequestNode} answer requests for whatever routes they've
+ * declared under this node's name (see
+ * {@link io.github.jaymcole.housegraph.plugins.web.RouteRegistry}). A path nobody has declared a
+ * route for answers {@code 404}.
  */
 @Display.Name("Web Server")
 @Node.Type("web.WebServerNode")

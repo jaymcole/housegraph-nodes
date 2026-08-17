@@ -7,6 +7,7 @@ import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
 
 import com.sun.net.httpserver.Headers;
+import io.github.jaymcole.housegraph.resource.ResourceRegistry;
 
 import javax.jmdns.JmDNS;
 import javax.jmdns.ServiceInfo;
@@ -17,6 +18,7 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -24,12 +26,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A small static-file web server that publishes itself on the LAN as {@code <name>.local}
@@ -51,6 +60,9 @@ import java.util.concurrent.Executors;
 public final class LocalWebServer {
 
     private static final Logger log = Log.get(LocalWebServer.class);
+
+    /** Fixed prefix under which declared Web Hook routes are dispatched — see {@link WebHookHandler}. */
+    private static final String HOOK_PREFIX = "/hooks";
 
     private final Object lock = new Object();
     private HttpServer httpServer;
@@ -82,7 +94,7 @@ public final class LocalWebServer {
         Path base = root.toAbsolutePath().normalize();
 
         synchronized (lock) {
-            bindHttpLocked(base, port, api, proxy);
+            bindHttpLocked(base, name, port, api, proxy);
 
             // Advertise <name>.local (A record) and an _http._tcp service on the same name.
             // JmDNS bound with the host name answers A queries for "<name>.local".
@@ -106,19 +118,21 @@ public final class LocalWebServer {
      * Package-visible seam for tests: starts only the static-file HTTP server (no mDNS,
      * which needs multicast and is environment-dependent) on an ephemeral port, mounting
      * {@code api} at {@code /api/data} if non-null, and returns the actual bound port.
+     * {@code name} is the key Web Hook dispatch and {@code ResourceRegistry} events use — the
+     * same name {@link #start} advertises under.
      */
-    int startHttpForTest(Path root, int port, DocumentApi api) throws IOException {
-        return startHttpForTest(root, port, api, null);
+    int startHttpForTest(Path root, String name, int port, DocumentApi api) throws IOException {
+        return startHttpForTest(root, name, port, api, null);
     }
 
     /** Test seam overload that also mounts a reverse-proxy route (no mDNS). */
-    int startHttpForTest(Path root, int port, DocumentApi api, ProxyRoute proxy) throws IOException {
+    int startHttpForTest(Path root, String name, int port, DocumentApi api, ProxyRoute proxy) throws IOException {
         if (root == null || !Files.isDirectory(root)) {
             throw new IllegalArgumentException("Website directory does not exist: " + root);
         }
         Path base = root.toAbsolutePath().normalize();
         synchronized (lock) {
-            bindHttpLocked(base, port, api, proxy);
+            bindHttpLocked(base, name, port, api, proxy);
             return httpServer.getAddress().getPort();
         }
     }
@@ -127,10 +141,13 @@ public final class LocalWebServer {
      * Binds and starts the HTTP server on the wildcard address (so both localhost and the
      * LAN can reach it), serving {@code base}. If {@code api} is non-null it's mounted at
      * {@code /api/data}; because that's a longer path prefix than {@code /}, the server
-     * routes API requests there and everything else to the static files. Caller holds
-     * {@link #lock}.
+     * routes API requests there and everything else to the static files. A
+     * {@link WebHookHandler} is always mounted at {@link #HOOK_PREFIX}, dispatching to
+     * whatever routes are declared for {@code name} in {@link RouteRegistry} at request time —
+     * unlike the other contexts, nothing needs to be wired or configured up front for it to be
+     * reachable. Caller holds {@link #lock}.
      */
-    private void bindHttpLocked(Path base, int port, DocumentApi api, ProxyRoute proxy) throws IOException {
+    private void bindHttpLocked(Path base, String name, int port, DocumentApi api, ProxyRoute proxy) throws IOException {
         if (httpServer != null) {
             throw new IllegalStateException("Server already running");
         }
@@ -144,6 +161,7 @@ public final class LocalWebServer {
             // and everything else falls through to the static files.
             server.createContext(proxy.pathPrefix(), new ProxyHandler(proxy.pathPrefix(), proxy.target()));
         }
+        server.createContext(HOOK_PREFIX, new WebHookHandler(name));
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         server.start();
@@ -349,6 +367,164 @@ public final class LocalWebServer {
                 out.write(body);
             }
         }
+    }
+
+    /**
+     * Dispatches every request under {@link #HOOK_PREFIX} to whatever {@link RouteRegistry}
+     * route matches its method and path, on behalf of {@code serverName} — the same name the
+     * owning Web Server node registers under in {@link ResourceRegistry}, which is also where
+     * the resulting {@link WebHookEvent} is published. A route that isn't declared answers
+     * {@code 404}, so a stray or mistyped webhook URL fails loudly rather than silently
+     * publishing to nobody.
+     * <p>
+     * A route declared with {@code awaitReply} holds the exchange open until a
+     * {@code Web Hook Reply} node answers it (via the event's {@link WebHookReply}) or its
+     * timeout elapses ({@code 504}); a fire-and-forget route answers {@code 202 Accepted} the
+     * instant the event is published, since the graph run it starts proceeds independently on
+     * background threads — nothing downstream can hold this handler, or its caller, up.
+     */
+    private static final class WebHookHandler implements HttpHandler {
+
+        /** Reject request bodies larger than this — a webhook payload should never need to be much. */
+        private static final int MAX_BODY_BYTES = 1024 * 1024;
+
+        private final String serverName;
+
+        WebHookHandler(String serverName) {
+            this.serverName = serverName;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            // Same reasoning as DocumentApiHandler: no try-with-resources, so an error response
+            // written from a catch block still reaches an open exchange. Close in finally.
+            try {
+                String method = exchange.getRequestMethod();
+                String path = routePath(exchange.getRequestURI().getPath());
+                Optional<WebHookRoute> route = RouteRegistry.shared().find(serverName, method, path);
+                if (route.isEmpty()) {
+                    respondText(exchange, 404, "No route declared for " + method + " " + path);
+                    return;
+                }
+                byte[] bodyBytes = readLimited(exchange.getRequestBody());
+                if (bodyBytes == null) {
+                    respondText(exchange, 413, "Payload Too Large");
+                    return;
+                }
+                String body = new String(bodyBytes, StandardCharsets.UTF_8);
+                Map<String, String> headers = flatten(exchange.getRequestHeaders());
+                Map<String, String> query = parseQuery(exchange.getRequestURI().getRawQuery());
+
+                if (route.get().awaitReply()) {
+                    dispatchAwaitingReply(exchange, route.get(), method, path, headers, query, body);
+                } else {
+                    ResourceRegistry.shared().publish(serverName, new WebHookEvent(method, path, headers, query, body, null));
+                    exchange.sendResponseHeaders(202, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        }
+
+        /** Publishes the event with a reply handle wired to {@code exchange}, then blocks for the route's timeout. */
+        private void dispatchAwaitingReply(HttpExchange exchange, WebHookRoute route, String method, String path,
+                                            Map<String, String> headers, Map<String, String> query, String body) throws IOException {
+            CompletableFuture<WebHookResponse> pending = new CompletableFuture<>();
+            WebHookReply reply = (status, contentType, replyBody) ->
+                    pending.complete(new WebHookResponse(status, contentType, replyBody));
+            ResourceRegistry.shared().publish(serverName, new WebHookEvent(method, path, headers, query, body, reply));
+            try {
+                WebHookResponse response = pending.get(route.timeoutSeconds(), TimeUnit.SECONDS);
+                byte[] responseBody = response.body() == null ? new byte[0] : response.body().getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type",
+                        response.contentType() == null ? "text/plain; charset=utf-8" : response.contentType());
+                exchange.sendResponseHeaders(response.status(), responseBody.length == 0 ? -1 : responseBody.length);
+                if (responseBody.length > 0) {
+                    try (OutputStream out = exchange.getResponseBody()) {
+                        out.write(responseBody);
+                    }
+                }
+            } catch (TimeoutException e) {
+                respondText(exchange, 504, "No reply within " + route.timeoutSeconds() + "s");
+            } catch (ExecutionException e) {
+                log.error("Web hook reply failed: {}", e);
+                respondText(exchange, 500, "Internal Server Error");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                respondText(exchange, 500, "Interrupted while waiting for a reply");
+            }
+        }
+
+        /** The path under {@link #HOOK_PREFIX}, with a leading slash — {@code /hooks} itself maps to {@code /}. */
+        private static String routePath(String requestPath) {
+            String rest = requestPath.length() > HOOK_PREFIX.length() ? requestPath.substring(HOOK_PREFIX.length()) : "/";
+            return rest.startsWith("/") ? rest : "/" + rest;
+        }
+
+        /**
+         * One value per header name — good enough for the automation triggers this is for. Case
+         * insensitive, like HTTP header names themselves: the JDK's own {@link Headers} already
+         * normalizes casing on the way in (lowercasing everything after the first letter, so
+         * {@code X-Signal} arrives as {@code X-signal}), and a webhook sender is free to send
+         * whatever casing it likes regardless — a graph shouldn't have to guess either one.
+         */
+        private static Map<String, String> flatten(Headers headers) {
+            Map<String, String> flat = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+                if (!entry.getValue().isEmpty()) {
+                    flat.put(entry.getKey(), entry.getValue().get(0));
+                }
+            }
+            return flat;
+        }
+
+        private static Map<String, String> parseQuery(String rawQuery) {
+            Map<String, String> params = new LinkedHashMap<>();
+            if (rawQuery == null || rawQuery.isBlank()) {
+                return params;
+            }
+            for (String pair : rawQuery.split("&")) {
+                if (pair.isEmpty()) {
+                    continue;
+                }
+                int eq = pair.indexOf('=');
+                String key = decode(eq < 0 ? pair : pair.substring(0, eq));
+                String value = eq < 0 ? "" : decode(pair.substring(eq + 1));
+                params.putIfAbsent(key, value);
+            }
+            return params;
+        }
+
+        private static String decode(String value) {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        }
+
+        /** Reads the body up to the cap; returns {@code null} if it would exceed it. */
+        private static byte[] readLimited(InputStream in) throws IOException {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = in.read(chunk)) != -1) {
+                if (buffer.size() + read > MAX_BODY_BYTES) {
+                    return null;
+                }
+                buffer.write(chunk, 0, read);
+            }
+            return buffer.toByteArray();
+        }
+
+        private static void respondText(HttpExchange exchange, int status, String message) throws IOException {
+            byte[] body = message.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+            exchange.sendResponseHeaders(status, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        }
+    }
+
+    /** The status/content-type/body a {@code Web Hook Reply} node answered a held request with. */
+    private record WebHookResponse(int status, String contentType, String body) {
     }
 
     /**
