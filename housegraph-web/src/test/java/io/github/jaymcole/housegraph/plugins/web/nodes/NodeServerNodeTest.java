@@ -1,64 +1,131 @@
 package io.github.jaymcole.housegraph.plugins.web.nodes;
 
+import io.github.jaymcole.housegraph.graph.BaseNode;
+import io.github.jaymcole.housegraph.graph.FlowEdge;
+import io.github.jaymcole.housegraph.graph.FlowPort;
+import io.github.jaymcole.housegraph.graph.NodeGraph;
+import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the Node-server node round-trips its inline configuration through {@code saveState}/
- * {@code loadState}, and the shape/guard rails of its Restart flow-in — the only headless
- * surfaces (actually spawning/relaunching a {@code node} process touches the OS and the network,
- * which belongs in a manual/integration check, not the unit suite).
+ * Verifies the Node-server node's port-driven configuration and its three-way flow-in branch
+ * (Start / Stop / Restart, told apart via {@code ProcessContext.wasTriggeredVia}) — the only
+ * headless surfaces. Actually spawning/relaunching a {@code node} process touches the OS and the
+ * network, which belongs in a manual/integration check, not the unit suite, so every test here
+ * either supplies no project directory (hitting the guard before any spawn) or uses Stop (a safe
+ * no-op on a server that was never started).
  */
 class NodeServerNodeTest {
 
-    @Test
-    void declaresARestartFlowInput() {
-        NodeServerNode node = new NodeServerNode();
+    /** A minimal flow source: one unnamed OUT port, fired by {@code execute()} — stands in for a trigger node. */
+    private static final class Trigger extends BaseNode {
+        private final FlowPort out = new FlowPort("Out", FlowPort.Direction.OUT);
 
-        assertEquals(1, node.getFlowInputs().size());
-        assertEquals("Restart", node.getFlowInputs().get(0).name);
+        @Override
+        public void process(ProcessContext ctx) {
+        }
+
+        @Override
+        public void configureInputs() {
+        }
+
+        @Override
+        public void configureOutputs() {
+        }
+
+        @Override
+        public void configureFlowOutputs() {
+            addFlowOutput(out);
+        }
+    }
+
+    private static NodeVariable<?> inputNamed(BaseNode node, String name) {
+        return node.getInputs().stream()
+                .filter(v -> v.name.equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No input named \"" + name + "\""));
+    }
+
+    /** Wires a fresh {@link Trigger} into {@code targetPort} of {@code node} and fires it, blocking until the run settles. */
+    private static void fire(NodeGraph graph, NodeServerNode node, FlowPort targetPort) {
+        Trigger trigger = new Trigger();
+        graph.addNode(trigger);
+        graph.registerFlowEdge(new FlowEdge(trigger, trigger.getFlowOutputs().get(0), node, targetPort));
+        trigger.execute();
+        graph.awaitIdle();
     }
 
     @Test
-    void restartRefusesToRunWithoutAProjectDirectory() {
+    void declaresItsDataInputsInDisplayOrder() {
         NodeServerNode node = new NodeServerNode();
 
-        assertThrows(IllegalStateException.class, () -> node.process(ProcessContext.uncancelled()),
-                "the Restart flow-in shouldn't silently no-op on a node nobody has configured yet");
+        assertEquals(List.of("Name", "Directory", "Command", "Port"),
+                node.getInputs().stream().map(v -> v.name).toList());
     }
 
     @Test
-    void savesAndReloadsConfiguration() {
-        NodeServerNode original = new NodeServerNode();
-        original.loadState(Map.of(
+    void declaresStartStopAndRestartFlowInputs() {
+        NodeServerNode node = new NodeServerNode();
+
+        assertEquals(List.of("Start", "Stop", "Restart"),
+                node.getFlowInputs().stream().map(p -> p.name).toList());
+    }
+
+    @Test
+    void aStartAttemptRefusesToRunWithoutAProjectDirectory() {
+        NodeServerNode node = new NodeServerNode();
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> node.process(ProcessContext.uncancelled()),
+                "an empty triggeredVia() defaults to a Start/Restart attempt, which shouldn't "
+                        + "silently no-op on a node nobody has configured yet");
+        assertEquals("No Node project directory configured", error.getMessage());
+    }
+
+    @Test
+    void stopNeverThrowsEvenWhenNothingWasEverStarted() {
+        NodeGraph graph = new NodeGraph();
+        NodeServerNode node = new NodeServerNode();
+        graph.addNode(node);
+
+        fire(graph, node, node.getFlowInputs().get(1)); // Stop
+
+        assertNull(node.getLastError(), "stopping a process that was never started must be a safe no-op");
+    }
+
+    @Test
+    void aFreshNodeDefaultsToNpmStartOnPort3000NamedNodeApp() {
+        NodeServerNode node = new NodeServerNode();
+
+        assertEquals("node-app", inputNamed(node, "Name").getValue());
+        assertEquals("npm start", inputNamed(node, "Command").getValue());
+        assertEquals(3000, inputNamed(node, "Port").getValue());
+    }
+
+    @Test
+    void legacyConfigurationInSavedStateMigratesOntoTheNewInputs() {
+        NodeServerNode node = new NodeServerNode();
+
+        node.loadState(Map.of(
                 "name", "my-app",
+                "directory", "/srv/my-app",
                 "command", "node server.js",
                 "port", "4000"));
 
-        Map<String, String> saved = original.saveState();
-
-        NodeServerNode reloaded = new NodeServerNode();
-        reloaded.loadState(saved);
-
-        assertEquals("my-app", saved.get("name"));
-        assertEquals("node server.js", saved.get("command"));
-        assertEquals("4000", saved.get("port"));
-        assertEquals(saved, reloaded.saveState(), "config should survive a save/load round-trip unchanged");
-    }
-
-    @Test
-    void declaresADirectoryDataInput() {
-        NodeServerNode node = new NodeServerNode();
-
-        assertEquals(1, node.getInputs().size());
-        assertEquals("Directory", node.getInputs().get(0).name);
+        assertEquals("my-app", inputNamed(node, "Name").getValue());
+        assertEquals("/srv/my-app", inputNamed(node, "Directory").getValue());
+        assertEquals("node server.js", inputNamed(node, "Command").getValue());
+        assertEquals(4000, inputNamed(node, "Port").getValue());
     }
 
     @Test
@@ -67,7 +134,7 @@ class NodeServerNodeTest {
 
         node.loadState(Map.of("name", "my-app", "directory", "/srv/my-app"));
 
-        assertEquals("/srv/my-app", node.getInputs().get(0).getValue(),
+        assertEquals("/srv/my-app", inputNamed(node, "Directory").getValue(),
                 "a pre-input-port save's directory should land on the new Directory input, "
                         + "not be dropped, since saveState()/loadState() no longer carries it");
     }
@@ -77,7 +144,9 @@ class NodeServerNodeTest {
         NodeServerNode node = new NodeServerNode();
         node.loadState(Map.of("name", "app", "port", "not-a-number"));
 
-        assertEquals("3000", node.saveState().get("port"), "an unparseable port should fall back to the default");
+        assertEquals(3000, inputNamed(node, "Port").getValue(),
+                "an unparseable legacy port should leave the Port input at its default rather than "
+                        + "migrating garbage onto it");
     }
 
     @Test

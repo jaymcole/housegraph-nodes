@@ -19,7 +19,6 @@ import io.github.jaymcole.housegraph.plugins.web.SiteBuilder;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.TextField;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
@@ -36,35 +35,40 @@ import java.util.Map;
  * {@code http://<name>.local:<port>/}. A long-lived resource node managed exactly like
  * the Discord bot node: it registers a {@link LocalWebServer} under its chosen name so
  * other nodes can find it, and its liveness is user-driven (Start/Stop) rather than tied
- * to graph flow.
+ * to graph flow — but "user-driven" now includes another node's flow-out, not just the
+ * inline buttons; see below.
  * <p>
- * Configuration — the website name and the port — is authored in the node's inline UI and
- * persisted via {@link #saveState()}; the directory to serve is a data input ({@code Directory}),
- * typed in directly or wired from an upstream node (e.g. a Create Folder node's output), and
- * persisted as an ordinary port value rather than through {@link #saveState()}. The actual
- * bind + mDNS advertisement runs off the UI thread so the app stays responsive, and is
- * torn down when the node is deleted or the app shuts down — the registry entry in
- * {@link #onRemoved()}, the socket and mDNS advertisement in {@link #releaseResources()}.
+ * Every setting — name, directory, output folder, build command, port, proxy target — is
+ * an ordinary data input: typed in directly on the node, or wired from an upstream node
+ * (e.g. a Create Folder or Git Sync output). Only {@code Directory} is required; the rest
+ * default sensibly and are resolved fresh every time this node runs, so rewiring one takes
+ * effect on the next Start/Restart without reopening the node.
+ * <p>
+ * Three flow-in ports drive the server's lifecycle, all landing in {@link #process}, which
+ * tells them apart with {@link ProcessContext#wasTriggeredVia(FlowPort)}:
+ * <ul>
+ *   <li><b>Start</b> — resolves every input, runs the build step (if configured), and
+ *       (re)binds the HTTP server.</li>
+ *   <li><b>Stop</b> — tears the server down; nothing else runs.</li>
+ *   <li><b>Rebuild</b> — runs the build step only, without touching the running server.
+ *       {@link LocalWebServer} already rereads the served directory from disk on every
+ *       request, so a fresh build is all a content update needs; wire something's flow-out
+ *       into it (e.g. {@code housegraph-github}'s Git Sync {@code Pulled} port) to rebuild
+ *       whenever new source lands.</li>
+ * </ul>
+ * The inline Start/Stop/Copy URL buttons are a convenience, not a separate code path: Start
+ * calls {@link #beginProcessing()} (a plain pull, so {@code ctx.triggeredVia()} reads empty),
+ * which {@link #process} treats the same as an explicit Start arrival; Stop calls the same
+ * teardown {@link #process} uses for a Stop arrival. Either a button or a wired trigger reaches
+ * the same code.
  * <p>
  * To give the hosted site shared, persisted storage, wire a {@code DataStoreNode}'s output
  * into this node's <b>Store</b> data input; the server then exposes it at {@code /api/data}.
- * The handle is pulled from that edge once, at Start ({@link #beginProcessing()} resolves the
- * input and {@link #process(io.github.jaymcole.housegraph.graph.ProcessContext)} captures it)
- * — so changing the wiring takes effect on the next Start, like the other settings. With
- * nothing wired, the site is served static-only and {@code /api/data} returns 503.
+ * With nothing wired, the site is served static-only and {@code /api/data} returns 503.
  * <p>
  * If it was serving when the graph was saved, it resumes automatically on load: the running flag
  * rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses Start for the
- * user once the graph (including the {@code Store} edge) is fully loaded (see {@link AutoStartable}).
- * <p>
- * The files actually served live under {@code Directory}'s {@link #outputFolder}, not
- * {@code Directory} itself — {@code Directory} is meant to be wireable to a project's root (e.g.
- * a Create Folder or Git Sync node), while a bundler like Vite writes its build to a subfolder of
- * that root ({@code dist} by default) rather than the root itself. Serving {@code Directory}
- * unmodified would hand the browser raw, untranspiled source (e.g. a Vite {@code index.html}
- * referencing {@code /src/main.tsx}), which fails to load with an unsupported-MIME-type error since
- * static file serving can't transpile JSX/TypeScript. Leave {@code outputFolder} blank to serve
- * {@code Directory} directly, for a project with no build step.
+ * user once the graph (including every wired input) is fully loaded (see {@link AutoStartable}).
  * <p>
  * Files are served straight off disk, so an edit that lands directly in the served directory — a
  * hand-authored HTML/CSS/JS site, say — shows up on the very next request with nothing further
@@ -83,13 +87,13 @@ import java.util.Map;
  * {@code WebHookNode} and {@code WebHookRequestNode} answer requests for whatever routes they've
  * declared under this node's name (see
  * {@link io.github.jaymcole.housegraph.plugins.web.RouteRegistry}). A path nobody has declared a
- * route for answers {@code 404}.
- */
+ * route for answers {@code 404}. */
 @Display.Name("Web Server")
 @Node.Type("web.WebServerNode")
 public class WebServerNode extends BaseNode implements NodeContentProvider, AutoStartable {
 
     private static final Logger log = Log.get(WebServerNode.class);
+    private static final String DEFAULT_NAME = "housegraph";
     private static final int DEFAULT_PORT = 8080;
     private static final String DEFAULT_BUILD_COMMAND = "npm run build";
     private static final String DEFAULT_OUTPUT_FOLDER = "dist";
@@ -97,12 +101,28 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private static final String PROXY_PREFIX = "/bridge";
 
     private final LocalWebServer server = new LocalWebServer();
-    private final NodeVariable<JsonDocumentStore> storeInput =
-            new NodeVariable<>("Store", JsonDocumentStore.class);
-    private final FlowPort rebuild = new FlowPort("Rebuild", FlowPort.Direction.IN);
+
+    private final NodeVariable<String> nameInput =
+            withDefault(new NodeVariable<>("Name", String.class, true), DEFAULT_NAME);
     private final NodeVariable<String> directoryInput =
             new NodeVariable<>("Directory", String.class, true).required();
-    private String resourceName = "housegraph";
+    private final NodeVariable<String> outputFolderInput =
+            withDefault(new NodeVariable<>("Output Folder", String.class, true), DEFAULT_OUTPUT_FOLDER);
+    private final NodeVariable<String> buildCommandInput =
+            withDefault(new NodeVariable<>("Build Command", String.class, true), DEFAULT_BUILD_COMMAND);
+    private final NodeVariable<Integer> portInput =
+            withDefault(new NodeVariable<>("Port", Integer.class, true), DEFAULT_PORT);
+    private final NodeVariable<String> proxyInput =
+            new NodeVariable<>("Proxy Target", String.class, true);
+    private final NodeVariable<JsonDocumentStore> storeInput =
+            new NodeVariable<>("Store", JsonDocumentStore.class);
+
+    private final FlowPort start = new FlowPort("Start", FlowPort.Direction.IN);
+    private final FlowPort stop = new FlowPort("Stop", FlowPort.Direction.IN);
+    private final FlowPort rebuild = new FlowPort("Rebuild", FlowPort.Direction.IN);
+
+    /** The name currently registered in {@link ResourceRegistry}; kept in sync with {@link #nameInput} at every run. */
+    private String resourceName = DEFAULT_NAME;
     private int port = DEFAULT_PORT;
     /** Optional backend to reverse-proxy at {@code /bridge/*} (e.g. {@code http://localhost:3000}); null = none. */
     private String proxyTarget;
@@ -111,47 +131,76 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     /** Subfolder of {@code Directory} actually served, e.g. {@code dist}; blank serves {@code Directory} itself. */
     private String outputFolder = DEFAULT_OUTPUT_FOLDER;
 
-    /** The store handle captured from the {@code Store} input at Start; null when nothing is wired. */
+    /** The store handle captured from the {@code Store} input at the last run; null when nothing is wired. */
     private volatile JsonDocumentStore resolvedStore;
-    /** The directory resolved from {@link #directoryInput} at the last {@link #beginProcessing()}; null until Start has run once. */
+    /** The directory captured from {@link #directoryInput} at the last run; null until one has happened. */
     private volatile String resolvedDirectory;
     /** True when the server was running at the moment the loaded graph was saved; drives {@link #autoStartIfWasRunning()}. */
     private boolean wasRunning;
 
-    private TextField nameField;
-    private TextField buildCommandField;
-    private TextField outputFolderField;
-    private TextField portField;
-    private TextField proxyField;
     private Button startButton;
     private Button stopButton;
     private Button copyUrlButton;
     private Label statusLabel;
 
+    /**
+     * Resolves every input fresh, then does exactly one of three things depending on which flow-in
+     * port brought control here (see {@link ProcessContext#wasTriggeredVia}):
+     * <ul>
+     *   <li>{@link #stop} — tears the server down and returns; nothing else runs.</li>
+     *   <li>{@link #rebuild} only (not also {@link #start}) — runs the build step and returns
+     *       without touching the server's bind state.</li>
+     *   <li>Anything else — including {@link #start}, and an empty {@code triggeredVia()} (a plain
+     *       {@link #beginProcessing()} pull, e.g. the Start button or {@link #autoStartIfWasRunning()})
+     *       — runs the build step and (re)binds the server. This is the default because a pull
+     *       carries no port identity to check, and defaulting to "try to run" is what a bare Start
+     *       button click needs.</li>
+     * </ul>
+     * A misconfigured {@code Directory} throws when actually trying to bind (not on a rebuild-only
+     * pass, which quietly no-ops with nothing configured yet — see {@link #runBuildIfConfigured()}),
+     * which the engine surfaces as this node's error for {@link #onExecuted()}/the button handlers.
+     */
     @Override
     public void process(ProcessContext ctx) {
-        // Runs during beginProcessing() at Start, with the run's value overlay bound, so this
-        // is the one place the edge-resolved store handle and directory are readable. Capture
-        // them for the server.
         resolvedStore = storeInput.getValue();
         resolvedDirectory = directoryInput.getValue();
+        syncResourceName();
+        port = clampPort(portInput.getValue());
+        proxyTarget = emptyToNull(proxyInput.getValue());
+        buildCommand = buildCommandInput.getValue();
+        outputFolder = outputFolderInput.getValue();
 
-        // Also runs the build step (if configured) in the just-resolved directory — both when
-        // beginProcessing() is invoked manually at Start and when the Rebuild flow-in fires, since
-        // both paths go through this one process() method. A cleared buildCommand (opting out of a
-        // build step) or no directory yet resolved is a no-op either way; a build failure throws,
-        // which the engine surfaces as this node's error for onExecuted()/start() to show.
+        if (ctx.wasTriggeredVia(stop)) {
+            stopServer();
+            return;
+        }
+
         try {
             runBuildIfConfigured();
         } catch (IOException e) {
             throw new RuntimeException("Site build failed for " + resourceName, e);
         }
+
+        boolean rebuildOnly = ctx.wasTriggeredVia(rebuild) && !ctx.wasTriggeredVia(start);
+        if (rebuildOnly) {
+            return;
+        }
+
+        if (resolvedDirectory == null || resolvedDirectory.isBlank()) {
+            throw new IllegalStateException("Pick a website directory first");
+        }
+        bindServer();
     }
 
     @Override
     public void configureInputs() {
-        addInput(storeInput);
+        addInput(nameInput);
         addInput(directoryInput);
+        addInput(outputFolderInput);
+        addInput(buildCommandInput);
+        addInput(portInput);
+        addInput(proxyInput);
+        addInput(storeInput);
     }
 
     @Override
@@ -160,13 +209,25 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     @Override
     public void configureFlowInputs() {
+        addFlowInput(start);
+        addFlowInput(stop);
         addFlowInput(rebuild);
+    }
+
+    /** Re-registers under {@link #nameInput}'s current value if it changed since the last run. */
+    private void syncResourceName() {
+        String newName = valueOr(nameInput.getValue(), DEFAULT_NAME);
+        if (!newName.equals(resourceName)) {
+            ResourceRegistry.shared().unregister(resourceName);
+            resourceName = newName;
+            ResourceRegistry.shared().register(resourceName, server);
+        }
     }
 
     /**
      * Runs {@link #buildCommand} in {@link #resolvedDirectory} — a no-op if the build step was
-     * cleared (opted out) or {@code Directory} hasn't resolved to anything yet; {@code start()}'s
-     * own directory check reports that case, so this one just quietly skips the build.
+     * cleared (opted out) or {@code Directory} hasn't resolved to anything yet; the {@code Directory}
+     * check in {@link #process} is what reports that case to the user for an actual Start.
      */
     private void runBuildIfConfigured() throws IOException {
         if (buildCommand == null || buildCommand.isBlank()) {
@@ -178,16 +239,24 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         SiteBuilder.run(Path.of(resolvedDirectory), buildCommand);
     }
 
+    /** Stops and (re)starts the HTTP server against the currently-resolved settings. */
+    private void bindServer() {
+        server.stop();
+        try {
+            server.start(servedRoot(), resourceName, port, documentApi(), proxyRoute());
+        } catch (IOException e) {
+            throw new RuntimeException("Web server '" + resourceName + "' failed to start: " + e.getMessage(), e);
+        }
+    }
+
+    private void stopServer() {
+        server.stop();
+        resolvedStore = null;
+    }
+
     @Override
     public Map<String, String> saveState() {
         Map<String, String> state = new HashMap<>();
-        state.put("name", resourceName);
-        state.put("port", Integer.toString(port));
-        if (proxyTarget != null) {
-            state.put("proxyTarget", proxyTarget);
-        }
-        state.put("buildCommand", buildCommand);
-        state.put("outputFolder", outputFolder);
         if (server.isRunning()) {
             state.put("running", "true");
         }
@@ -196,32 +265,36 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     @Override
     public void loadState(Map<String, String> state) {
-        String name = state.get("name");
-        if (name != null && !name.isBlank()) {
-            resourceName = name;
-        }
-        // Pre-input-port saves kept the directory in this custom state map; migrate it onto the
-        // new "Directory" input so an old graph doesn't lose it (applyValues() no-ops afterward
-        // for such a save, since its "inputs" array has no entry for a port that didn't exist yet).
+        // Pre-input-port saves kept these fields in this custom state map; migrate each onto its
+        // new port so an old graph doesn't lose its settings (applyValues() no-ops afterward for
+        // such a save, since its "inputs" array has no entry for a port that didn't exist yet).
         String legacyDirectory = emptyToNull(state.get("directory"));
         if (legacyDirectory != null) {
             directoryInput.setValue(legacyDirectory);
         }
-        port = parsePort(state.get("port"));
-        proxyTarget = emptyToNull(state.get("proxyTarget"));
-        // Distinct from a plain "fall back to the default if blank" read: an explicitly cleared
-        // buildCommand ("skip the build step") must round-trip as blank, not snap back to "npm run
-        // build" — only an absent key (a save from before buildCommand existed) defaults to it.
-        String savedBuildCommand = state.get("buildCommand");
-        if (savedBuildCommand != null) {
-            buildCommand = savedBuildCommand;
+        String legacyName = emptyToNull(state.get("name"));
+        if (legacyName != null) {
+            nameInput.setValue(legacyName);
         }
-        // Distinct from the blank checks above: an explicitly emptied outputFolder ("serve
-        // Directory directly") must round-trip as blank, not fall back to the "dist" default —
-        // only an absent key (a save from before this field existed) should default to "dist".
-        String savedOutputFolder = state.get("outputFolder");
-        if (savedOutputFolder != null) {
-            outputFolder = savedOutputFolder;
+        Integer legacyPort = parseLegacyPort(state.get("port"));
+        if (legacyPort != null) {
+            portInput.setValue(legacyPort);
+        }
+        String legacyProxyTarget = emptyToNull(state.get("proxyTarget"));
+        if (legacyProxyTarget != null) {
+            proxyInput.setValue(legacyProxyTarget);
+        }
+        // Distinct from a plain "fall back to the default if blank" read: an explicitly cleared
+        // buildCommand/outputFolder ("skip the build step" / "serve Directory directly") must
+        // migrate as blank, not snap back to the default — only an absent key (a save from before
+        // the field existed at all) should leave the port's constructor default untouched.
+        String legacyBuildCommand = state.get("buildCommand");
+        if (legacyBuildCommand != null) {
+            buildCommandInput.setValue(legacyBuildCommand);
+        }
+        String legacyOutputFolder = state.get("outputFolder");
+        if (legacyOutputFolder != null) {
+            outputFolderInput.setValue(legacyOutputFolder);
         }
         wasRunning = Boolean.parseBoolean(state.get("running"));
     }
@@ -235,6 +308,7 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
 
     @Override
     protected void onActivated() {
+        resourceName = valueOr(nameInput.getValue(), DEFAULT_NAME);
         ResourceRegistry.shared().register(resourceName, server);
     }
 
@@ -255,11 +329,12 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     }
 
     /**
-     * Reflects a Rebuild flow-in firing in the same status label the Start/Stop path drives. Only
-     * touches the label when there's something worth reporting — a build failure, or a successful
-     * build reflected as the same "Serving at …" text Start itself sets — so it can't stomp on
-     * "Starting…"/"Start failed…" text a concurrent Start is in the middle of writing. Reached on
-     * the FX thread (the engine's callback executor); a no-op if the node's UI was never built.
+     * Reflects the outcome of any {@code process()} pass — a Start, Stop or Rebuild arriving along a
+     * wired flow edge, or a plain pull like the button handlers' own {@link #beginProcessing()} call
+     * racing to update the same label — in the status label/buttons. Idempotent: both paths compute
+     * the same text from {@link LocalWebServer#isRunning()}/{@link #getLastError()}, so whichever
+     * runs last leaves the correct state either way. Reached on the FX thread (the engine's callback
+     * executor); a no-op if the node's UI was never built.
      */
     @Override
     protected void onExecuted() {
@@ -268,37 +343,19 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         }
         Throwable error = getLastError();
         if (error != null) {
-            statusLabel.setText("Rebuild failed — " + error.getMessage());
-            return;
-        }
-        if (server.isRunning()) {
+            statusLabel.setText("Failed — " + error.getMessage());
+        } else if (server.isRunning()) {
             statusLabel.setText("Serving at " + server.url());
+        } else {
+            statusLabel.setText("Stopped");
         }
+        startButton.setDisable(server.isRunning());
+        stopButton.setDisable(!server.isRunning());
+        copyUrlButton.setDisable(!server.isRunning());
     }
 
     @Override
     public javafx.scene.Node createNodeContent() {
-        nameField = new TextField(resourceName);
-        nameField.setPromptText("Website name (→ name.local)");
-        nameField.textProperty().addListener((obs, old, value) -> rename(value));
-
-        portField = new TextField(Integer.toString(port));
-        portField.setPromptText("Port");
-        portField.setPrefColumnCount(5);
-        portField.textProperty().addListener((obs, old, value) -> port = parsePort(value));
-
-        proxyField = new TextField(proxyTarget == null ? "" : proxyTarget);
-        proxyField.setPromptText("API proxy target → /bridge (e.g. http://localhost:3000)");
-        proxyField.textProperty().addListener((obs, old, value) -> proxyTarget = emptyToNull(value));
-
-        buildCommandField = new TextField(buildCommand);
-        buildCommandField.setPromptText("Build command, run in Directory (blank to skip, e.g. npm run build)");
-        buildCommandField.textProperty().addListener((obs, old, value) -> buildCommand = value);
-
-        outputFolderField = new TextField(outputFolder);
-        outputFolderField.setPromptText("Static files subfolder of Directory (e.g. dist)…");
-        outputFolderField.textProperty().addListener((obs, old, value) -> outputFolder = value);
-
         startButton = new Button("Start");
         startButton.setMaxWidth(Double.MAX_VALUE);
         startButton.setOnAction(e -> start());
@@ -317,41 +374,26 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, startButton, stopButton);
-        return new VBox(4, nameField, outputFolderField, buildCommandField, portField, proxyField,
-                buttons, copyUrlButton, statusLabel);
+        return new VBox(4, buttons, copyUrlButton, statusLabel);
     }
 
-    private void rename(String newName) {
-        ResourceRegistry.shared().unregister(resourceName);
-        resourceName = newName;
-        ResourceRegistry.shared().register(resourceName, server);
-    }
-
+    /**
+     * Runs {@link #process} via {@link #beginProcessing()} on a background thread — a plain pull, so
+     * {@code ctx.triggeredVia()} reads empty and {@link #process} defaults to its Start behaviour,
+     * exactly like a wired Start arrival. UI feedback is handled here rather than left to
+     * {@link #onExecuted()} so a failure can report the specific exception message immediately.
+     */
     private void start() {
-        setEditingLocked(true);
         startButton.setDisable(true);
         statusLabel.setText("Starting…");
 
         Thread thread = new Thread(() -> {
             try {
-                // Pull the Store and Directory inputs (if wired), capture their resolved values,
-                // and run the build step (if configured) — all via process(), before serving. This
-                // is also what picks up a freshly-wired Create Folder node even on the very first
-                // Start since it was wired.
                 beginProcessing();
-                Throwable buildError = getLastError();
-                if (buildError != null) {
-                    throw new RuntimeException(buildError.getMessage(), buildError);
+                Throwable error = getLastError();
+                if (error != null) {
+                    throw new RuntimeException(error.getMessage(), error);
                 }
-                if (resolvedDirectory == null || resolvedDirectory.isBlank()) {
-                    Platform.runLater(() -> {
-                        statusLabel.setText("Pick a website directory first");
-                        setEditingLocked(false);
-                        startButton.setDisable(false);
-                    });
-                    return;
-                }
-                server.start(servedRoot(), resourceName, port, documentApi(), proxyRoute());
                 Platform.runLater(() -> {
                     statusLabel.setText("Serving at " + server.url());
                     stopButton.setDisable(false);
@@ -361,7 +403,6 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
                 log.error("Web server start failed: {}", ex);
                 Platform.runLater(() -> {
                     statusLabel.setText("Start failed — " + ex.getMessage());
-                    setEditingLocked(false);
                     startButton.setDisable(false);
                 });
             }
@@ -371,10 +412,8 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     }
 
     private void stop() {
-        server.stop();
-        resolvedStore = null;
+        stopServer();
         statusLabel.setText("Stopped");
-        setEditingLocked(false);
         startButton.setDisable(false);
         stopButton.setDisable(true);
         copyUrlButton.setDisable(true);
@@ -443,12 +482,12 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         return store;
     }
 
-    /** Test seam: the store handle captured from the {@code Store} input at the last {@link #beginProcessing()}. */
+    /** Test seam: the store handle captured from the {@code Store} input at the last run. */
     JsonDocumentStore resolvedStore() {
         return resolvedStore;
     }
 
-    /** Test seam: the directory captured from the {@code Directory} input at the last {@link #beginProcessing()}. */
+    /** Test seam: the directory captured from the {@code Directory} input at the last run. */
     String resolvedDirectory() {
         return resolvedDirectory;
     }
@@ -469,23 +508,31 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
         statusLabel.setText("Copied " + url);
     }
 
-    private void setEditingLocked(boolean locked) {
-        nameField.setDisable(locked);
-        buildCommandField.setDisable(locked);
-        outputFolderField.setDisable(locked);
-        portField.setDisable(locked);
-        proxyField.setDisable(locked);
+    private static <T> NodeVariable<T> withDefault(NodeVariable<T> variable, T value) {
+        variable.setValue(value);
+        return variable;
     }
 
-    private static int parsePort(String value) {
-        if (value == null || value.isBlank()) {
+    private static String valueOr(String value, String fallback) {
+        return (value == null || value.isBlank()) ? fallback : value;
+    }
+
+    private static int clampPort(Integer value) {
+        if (value == null) {
             return DEFAULT_PORT;
+        }
+        return (value >= 1 && value <= 65535) ? value : DEFAULT_PORT;
+    }
+
+    private static Integer parseLegacyPort(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
         }
         try {
             int parsed = Integer.parseInt(value.trim());
-            return (parsed >= 1 && parsed <= 65535) ? parsed : DEFAULT_PORT;
+            return (parsed >= 1 && parsed <= 65535) ? parsed : null;
         } catch (NumberFormatException e) {
-            return DEFAULT_PORT;
+            return null;
         }
     }
 
