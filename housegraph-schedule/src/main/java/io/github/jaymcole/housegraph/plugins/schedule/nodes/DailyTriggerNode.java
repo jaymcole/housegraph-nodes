@@ -36,12 +36,13 @@ import java.util.stream.Collectors;
  * time on every selected day; Stop disarms it. Purely a flow source, control-only per this
  * repository's node design rule — no data ports, no external action of its own.
  * <p>
- * Start/Stop are inline buttons only, no flow-in counterparts — nothing else can arm or disarm
- * this schedule mid-graph, which keeps it self-contained and, structurally, an
- * {@link #isExecutionEntryPoint() execution entry point} by the default rule (a flow-out with no
- * flow-in). {@code process()} does no work of its own; the armed timer calls {@link #execute()}
- * directly at each scheduled moment, and the engine's default (no {@link #activate} call) fires
- * the single flow-out every time.
+ * The Start/Stop buttons have flow-in counterparts of the same name, so another node's cascade
+ * can arm or disarm the schedule (see {@link ProcessContext#wasTriggeredVia}). Arriving through
+ * either port never fires this node's own flow-out itself — only a scheduled tick does — so
+ * {@link #process(ProcessContext)} calls {@link #activateNone()} for those firings; the actual
+ * button-equivalent work happens in {@link #onExecuted()} once it's back on the FX thread, since
+ * {@code process()} runs on a background execution thread and can't touch the {@link Timeline} or
+ * controls directly.
  * <p>
  * The actual "when" is computed by {@link WeeklySchedule}, kept free of JavaFX so it can be tested
  * against fixed instants; this class only owns the day/time selection, the one-second-tick
@@ -61,6 +62,12 @@ public class DailyTriggerNode extends BaseNode implements NodeContentProvider, A
     };
     private static final String[] DAY_LABELS = {"M", "T", "W", "TH", "F", "SA", "SU"};
     private static final DateTimeFormatter NEXT_FIRE_FORMAT = DateTimeFormatter.ofPattern("EEE HH:mm");
+    private static final String DAY_BUTTON_STYLE = "-fx-font-size: 9px; -fx-padding: 2 4 2 4;";
+    private static final String DAY_BUTTON_SELECTED_STYLE =
+            DAY_BUTTON_STYLE + " -fx-background-color: #1976d2; -fx-text-fill: white;";
+
+    private final FlowPort startFlowInput = new FlowPort("Start", FlowPort.Direction.IN);
+    private final FlowPort stopFlowInput = new FlowPort("Stop", FlowPort.Direction.IN);
 
     /** Days this schedule fires on. Mutated directly by the toggle buttons; empty until the user picks at least one. */
     private final Set<DayOfWeek> selectedDays = EnumSet.noneOf(DayOfWeek.class);
@@ -78,9 +85,31 @@ public class DailyTriggerNode extends BaseNode implements NodeContentProvider, A
     private Label statusLabel;
     /** True when the schedule was armed at the moment the loaded graph was saved; drives {@link #autoStartIfWasRunning()}. */
     private boolean wasRunning;
+    /** Set in {@link #process(ProcessContext)}, consumed in {@link #onExecuted()} once control is back on the FX thread. */
+    private volatile FlowPort pendingFlowAction;
 
     @Override
     public void process(ProcessContext ctx) {
+        if (ctx.wasTriggeredVia(startFlowInput)) {
+            pendingFlowAction = startFlowInput;
+            activateNone();
+        } else if (ctx.wasTriggeredVia(stopFlowInput)) {
+            pendingFlowAction = stopFlowInput;
+            activateNone();
+        } else {
+            pendingFlowAction = null;
+        }
+    }
+
+    @Override
+    protected void onExecuted() {
+        FlowPort action = pendingFlowAction;
+        pendingFlowAction = null;
+        if (action == startFlowInput) {
+            armTimer();
+        } else if (action == stopFlowInput) {
+            stop();
+        }
     }
 
     @Override
@@ -143,8 +172,25 @@ public class DailyTriggerNode extends BaseNode implements NodeContentProvider, A
     }
 
     @Override
+    public void configureFlowInputs() {
+        addFlowInput(startFlowInput);
+        addFlowInput(stopFlowInput);
+    }
+
+    @Override
     public void configureFlowOutputs() {
         addFlowOutput(new FlowPort("", FlowPort.Direction.OUT));
+    }
+
+    /**
+     * Structurally this now has a flow-in (Start/Stop), so the default would say it can only run
+     * when reached along an edge. It is still self-triggering: the buttons call {@link #start()}/
+     * {@link #stop()} directly, and the armed timer calls {@link #execute()} on itself at each
+     * scheduled moment.
+     */
+    @Override
+    public boolean isExecutionEntryPoint() {
+        return true;
     }
 
     @Override
@@ -155,7 +201,9 @@ public class DailyTriggerNode extends BaseNode implements NodeContentProvider, A
             DayOfWeek day = DAY_ORDER[i];
             ToggleButton button = new ToggleButton(DAY_LABELS[i]);
             button.setSelected(selectedDays.contains(day));
-            button.setStyle("-fx-font-size: 9px; -fx-padding: 2 4 2 4;");
+            button.setStyle(selectedDays.contains(day) ? DAY_BUTTON_SELECTED_STYLE : DAY_BUTTON_STYLE);
+            button.selectedProperty().addListener((obs, wasSelected, isSelected) ->
+                    button.setStyle(isSelected ? DAY_BUTTON_SELECTED_STYLE : DAY_BUTTON_STYLE));
             button.setOnAction(event -> {
                 if (button.isSelected()) {
                     selectedDays.add(day);

@@ -1,5 +1,6 @@
 package io.github.jaymcole.housegraph.plugins.schedule.nodes;
 
+import io.github.jaymcole.housegraph.graph.FlowPort;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;
@@ -18,23 +19,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * day, and whether it was armed - so it can auto-start on load (see {@code AutoStartable}). The
  * timer itself is a JavaFX {@code Timeline} built by {@code createNodeContent()}, and the actual
  * "when" math lives in the JavaFX-free {@code WeeklySchedule} (see {@code WeeklyScheduleTest}), so
- * this stays on the headless contract - ports and persistence - rather than driving the UI.
+ * this stays on the headless contract - ports and persistence - rather than driving the UI. The
+ * Start/Stop cascade-suppression behaviour ({@code activateNone()}) needs a live {@code NodeGraph}
+ * to observe, so it isn't exercised here either - only the port shapes are.
  */
 class DailyTriggerNodeTest {
 
     @Test
-    void hasNoFlowInputsAndOneUnnamedFlowOutput() {
+    void exposesNamedStartAndStopFlowInputsAndOneUnnamedFlowOutput() {
         DailyTriggerNode node = new DailyTriggerNode();
 
-        assertTrue(node.getFlowInputs().isEmpty(), "nothing can wire into Start/Stop - the inline buttons are the only control");
+        List<FlowPort> flowInputs = node.getFlowInputs();
+        assertEquals(2, flowInputs.size(), "Start and Stop, and nothing else");
+        assertEquals("Start", flowInputs.get(0).name);
+        assertEquals("Stop", flowInputs.get(1).name);
+
         assertEquals(1, node.getFlowOutputs().size());
         assertEquals("", node.getFlowOutputs().get(0).name);
     }
 
     @Test
-    void isAnExecutionEntryPointByTheDefaultRule() {
+    void remainsAnExecutionEntryPointDespiteNowHavingFlowInputs() {
         assertTrue(new DailyTriggerNode().isExecutionEntryPoint(),
-                "a flow-out with no flow-in is an entry point by BaseNode's default rule");
+                "the buttons and the armed timer still self-trigger it directly, regardless of Start/Stop wiring");
     }
 
     @Test
