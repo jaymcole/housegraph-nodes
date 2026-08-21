@@ -52,6 +52,16 @@ import java.util.Map;
  * not {@code botInput.getValue()} — the same reasoning as {@code DiscordSendMessageNode}: a
  * {@code DiscordBot} is a live resource wired in from a node outside this node's own
  * flow-triggered pass, so pulling it via the normal per-pass data-edge resolution is unreliable.
+ * <p>
+ * A click's message has its buttons disabled so they can't be pressed again — handled in
+ * {@link DiscordBot}'s button-interaction listener. That listener also decides, per button id,
+ * whether to defer the click ephemerally (visible only to the clicker) via
+ * {@link DiscordBot#setButtonEphemeral}: this node declares that preference — ephemeral unless
+ * {@code Reply} has an outgoing edge — every time it matters (bot wired, labels changed, or
+ * {@code Reply}'s wiring changed), tracked via {@link #onOutputEdgeAdded}/
+ * {@link #onOutputEdgeRemoved}. A prior declaration is withdrawn first so a removed/renamed
+ * button doesn't leave a stale entry behind for some other node's button of the same label to
+ * pick up.
  */
 @Display.Name("Discord Send Buttons")
 @Node.Type("discord.DiscordSendButtonsNode")
@@ -72,6 +82,9 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
 
     private DiscordBot bot;
     private Subscription subscription;
+    private boolean replyWired;
+    private DiscordBot declaredBot;
+    private List<String> declaredLabels = new ArrayList<>();
 
     public DiscordSendButtonsNode() {
         log.info("Discord Send Buttons [{}] constructed", System.identityHashCode(this));
@@ -167,6 +180,31 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         subscribeTo(null);
     }
 
+    @Override
+    protected void onOutputEdgeAdded(Edge edge) {
+        if (edge.getSourceVariable() == reply) {
+            replyWired = true;
+            redeclareEphemeral();
+        }
+    }
+
+    @Override
+    protected void onOutputEdgeRemoved(Edge edge) {
+        if (edge.getSourceVariable() == reply) {
+            replyWired = hasOutgoingReplyEdge();
+            redeclareEphemeral();
+        }
+    }
+
+    private boolean hasOutgoingReplyEdge() {
+        for (Edge edge : getOutgoingDataEdges()) {
+            if (edge.getSourceVariable() == reply) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void subscribeTo(DiscordBot newBot) {
         if (subscription != null) {
             subscription.cancel();
@@ -178,6 +216,28 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
                 System.identityHashCode(this), newBot != null ? "captured" : "cleared", newBot);
         if (bot != null) {
             subscription = bot.addButtonListener(this::onClick);
+        }
+        redeclareEphemeral();
+    }
+
+    /**
+     * (Re)declares this node's ephemeral preference for its currently configured button labels
+     * against the currently wired bot, withdrawing whatever was previously declared first (bot
+     * and/or labels may have changed since).
+     */
+    private void redeclareEphemeral() {
+        if (declaredBot != null) {
+            for (String label : declaredLabels) {
+                declaredBot.clearButtonEphemeral(label);
+            }
+        }
+        declaredBot = bot;
+        declaredLabels = new ArrayList<>(buttonLabels);
+        if (bot != null) {
+            boolean ephemeral = !replyWired;
+            for (String label : buttonLabels) {
+                bot.setButtonEphemeral(label, ephemeral);
+            }
         }
     }
 
@@ -231,6 +291,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         buttonLabels.clear();
         buttonLabels.addAll(edited);
         rebuildPorts();
+        redeclareEphemeral();
     }
 
     private static List<String> parseLabels(String text) {

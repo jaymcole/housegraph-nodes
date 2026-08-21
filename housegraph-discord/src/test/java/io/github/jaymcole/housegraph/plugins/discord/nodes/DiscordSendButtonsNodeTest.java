@@ -6,6 +6,7 @@ import io.github.jaymcole.housegraph.graph.NodeGraph;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordReply;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,8 +14,10 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * This node is both an action (send, via its flow-in) and an event source (a button click, via
@@ -52,11 +55,36 @@ class DiscordSendButtonsNodeTest {
         }
     }
 
+    /** A minimal data node with a DiscordReply input — stands in for a Discord Reply node. */
+    private static final class ReplySink extends BaseNode {
+        private final NodeVariable<DiscordReply> in = new NodeVariable<>("Reply", DiscordReply.class).transientValue();
+
+        @Override
+        public void process(ProcessContext ctx) {
+        }
+
+        @Override
+        public void configureInputs() {
+            addInput(in);
+        }
+
+        @Override
+        public void configureOutputs() {
+        }
+    }
+
     private static NodeVariable<?> inputNamed(BaseNode node, String name) {
         return node.getInputs().stream()
                 .filter(v -> v.name.equals(name))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("No input named \"" + name + "\""));
+    }
+
+    private static NodeVariable<?> outputNamed(BaseNode node, String name) {
+        return node.getOutputs().stream()
+                .filter(v -> v.name.equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No output named \"" + name + "\""));
     }
 
     @Test
@@ -148,5 +176,87 @@ class DiscordSendButtonsNodeTest {
 
         assertNull(inputNamed(node, "Bot").getValue(),
                 "unwiring the Bot edge should drop the click subscription and clear the captured bot");
+    }
+
+    @Test
+    void withNothingWiredToReplyItsButtonsDeferEphemeral() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes,No"));
+        node.reconfigure();
+        graph.addNode(source);
+        graph.addNode(node);
+
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+
+        assertTrue(bot.isButtonEphemeral("Yes"));
+        assertTrue(bot.isButtonEphemeral("No"));
+    }
+
+    @Test
+    void wiringReplyToAConsumerMakesItsButtonsNonEphemeral() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes,No"));
+        node.reconfigure();
+        ReplySink sink = new ReplySink();
+        graph.addNode(source);
+        graph.addNode(node);
+        graph.addNode(sink);
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+
+        graph.registerEdge(new Edge(node, outputNamed(node, "Reply"), sink, inputNamed(sink, "Reply")));
+
+        assertFalse(bot.isButtonEphemeral("Yes"));
+        assertFalse(bot.isButtonEphemeral("No"));
+    }
+
+    @Test
+    void removingTheReplyEdgeRevertsItsButtonsToEphemeral() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes"));
+        node.reconfigure();
+        ReplySink sink = new ReplySink();
+        graph.addNode(source);
+        graph.addNode(node);
+        graph.addNode(sink);
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+        Edge replyEdge = new Edge(node, outputNamed(node, "Reply"), sink, inputNamed(sink, "Reply"));
+        graph.registerEdge(replyEdge);
+        assertFalse(bot.isButtonEphemeral("Yes"), "sanity check: wired, so non-ephemeral");
+
+        graph.removeEdge(replyEdge);
+
+        assertTrue(bot.isButtonEphemeral("Yes"), "unwiring Reply should revert to the ephemeral default");
+    }
+
+    @Test
+    void unwiringTheBotWithdrawsItsEphemeralDeclarations() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes"));
+        node.reconfigure();
+        ReplySink sink = new ReplySink();
+        graph.addNode(source);
+        graph.addNode(node);
+        graph.addNode(sink);
+        Edge botEdge = new Edge(source, source.out, node, inputNamed(node, "Bot"));
+        graph.registerEdge(botEdge);
+        graph.registerEdge(new Edge(node, outputNamed(node, "Reply"), sink, inputNamed(sink, "Reply")));
+        assertFalse(bot.isButtonEphemeral("Yes"), "sanity check: wired, so non-ephemeral");
+
+        graph.removeEdge(botEdge);
+
+        assertTrue(bot.isButtonEphemeral("Yes"),
+                "unwiring the bot should withdraw this node's declarations from it, not leave them stale");
     }
 }

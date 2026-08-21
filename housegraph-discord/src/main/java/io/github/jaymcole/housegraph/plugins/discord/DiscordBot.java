@@ -16,6 +16,7 @@ import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
@@ -61,6 +62,12 @@ public final class DiscordBot {
     private volatile String guildId;
     /** Command name (lowercase) -> whether its reply is ephemeral; consulted when deferring an interaction. */
     private final Map<String, Boolean> ephemeralByCommand = new ConcurrentHashMap<>();
+    /**
+     * Button id -> whether a click on it should be deferred ephemerally; consulted when
+     * deferring a button interaction. An id absent from this map (e.g. a button this bot didn't
+     * send) defaults to ephemeral, the safer choice when nothing declared a preference.
+     */
+    private final Map<String, Boolean> ephemeralByButton = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<Consumer<DiscordMessage>> messageListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<DiscordSlashCommand>> slashListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<DiscordButtonClick>> buttonListeners = new CopyOnWriteArrayList<>();
@@ -117,6 +124,21 @@ public final class DiscordBot {
     public Subscription addButtonListener(Consumer<DiscordButtonClick> listener) {
         buttonListeners.add(listener);
         return () -> buttonListeners.remove(listener);
+    }
+
+    /** Declares whether a click on {@code buttonId} should be deferred ephemerally; consulted at defer time. */
+    public void setButtonEphemeral(String buttonId, boolean ephemeral) {
+        ephemeralByButton.put(buttonId, ephemeral);
+    }
+
+    /** Withdraws a previously declared ephemeral preference for {@code buttonId}, reverting it to the default (ephemeral). */
+    public void clearButtonEphemeral(String buttonId) {
+        ephemeralByButton.remove(buttonId);
+    }
+
+    /** Whether a click on {@code buttonId} would currently be deferred ephemerally — the same lookup {@link #setButtonEphemeral} feeds. */
+    public boolean isButtonEphemeral(String buttonId) {
+        return ephemeralByButton.getOrDefault(buttonId, true);
     }
 
     /** The guild (server) id to register slash commands to for instant availability; null/blank registers globally (slow to propagate). */
@@ -245,9 +267,18 @@ public final class DiscordBot {
         @Override
         public void onButtonInteraction(ButtonInteractionEvent event) {
             // Same defer-then-answer-via-hook treatment as slash commands (~15 min to reply).
-            event.deferReply(false).queue();
+            // Ephemeral is decided by whoever declared this button id (see
+            // #setButtonEphemeral) — normally a Discord Send Buttons node, deciding based on
+            // whether anything is actually wired to its Reply output. An undeclared id (e.g. a
+            // button this bot didn't send) defaults to ephemeral, the safer choice.
+            event.deferReply(isButtonEphemeral(event.getComponentId())).queue();
             InteractionHook hook = event.getHook();
             DiscordReply reply = text -> hook.editOriginal(text).queue();
+
+            // Disable the clicked message's buttons so it can't be pressed again. A plain
+            // message edit, independent of the interaction's own ack/reply above.
+            List<Button> disabled = event.getMessage().getButtons().stream().map(Button::asDisabled).toList();
+            event.getMessage().editMessageComponents(ActionRow.partitionOf(disabled)).queue();
 
             DiscordButtonClick click = new DiscordButtonClick(
                     event.getComponentId(),
