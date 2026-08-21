@@ -46,6 +46,12 @@ import java.util.Map;
  * empty {@link ProcessContext#triggeredVia()}, since neither traverses an actual flow edge). A
  * click instead calls {@link #runFlowBranchToCompletion(FlowPort, Runnable)} directly on the
  * matching button port, off a background thread since it blocks until that branch finishes.
+ * <p>
+ * {@code Bot} is captured eagerly via {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} into
+ * a plain field (needed anyway for the click subscription); {@code process()} reads that field,
+ * not {@code botInput.getValue()} — the same reasoning as {@code DiscordSendMessageNode}: a
+ * {@code DiscordBot} is a live resource wired in from a node outside this node's own
+ * flow-triggered pass, so pulling it via the normal per-pass data-edge resolution is unreliable.
  */
 @Display.Name("Discord Send Buttons")
 @Node.Type("discord.DiscordSendButtonsNode")
@@ -69,10 +75,9 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
 
     @Override
     public void process(ProcessContext ctx) {
-        DiscordBot currentBot = botInput.getValue();
         String text = message.getValue();
         String channelId = channel.getValue();
-        if (currentBot == null) {
+        if (bot == null) {
             log.warn("Discord Send Buttons did nothing: no Bot wired in");
             activateNone(); // nothing was sent, so no branch — including a button's — should fire
             return;
@@ -91,7 +96,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         for (String label : buttonLabels) {
             buttons.add(new DiscordButtonSpec(label, label));
         }
-        currentBot.sendMessage(channelId, text, buttons);
+        bot.sendMessage(channelId, text, buttons);
         activate(sent); // explicit: with button branches also declared, the "activate nothing -> fire everything" default would fire those too
     }
 
