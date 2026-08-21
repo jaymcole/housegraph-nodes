@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
@@ -15,6 +16,7 @@ import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
+import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 
 import java.util.ArrayList;
@@ -42,7 +44,9 @@ import java.util.function.Consumer;
  *   <li>slash commands are registered via {@link #syncCommands} and their invocations
  *       delivered to every {@link #addSlashListener listener}, deferred so a slow graph
  *       has time (~15 min) to answer through the {@link DiscordReply} handle.</li>
- *   <li>{@link #sendMessage} posts to a channel by id.</li>
+ *   <li>{@link #sendMessage} posts to a channel by id, optionally with buttons attached;
+ *       clicks on those buttons are delivered to every {@link #addButtonListener listener},
+ *       deferred the same way as slash commands so a slow graph still gets to answer.</li>
  * </ul>
  * Reading message content needs the privileged <b>MESSAGE_CONTENT</b> intent enabled for
  * the bot in Discord's developer portal; slash commands need no special intent.
@@ -58,6 +62,7 @@ public final class DiscordBot {
     private final Map<String, Boolean> ephemeralByCommand = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<Consumer<DiscordMessage>> messageListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<DiscordSlashCommand>> slashListeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<Consumer<DiscordButtonClick>> buttonListeners = new CopyOnWriteArrayList<>();
 
     /**
      * Logs in with {@code token} and blocks until the gateway is ready. Call from a
@@ -103,6 +108,12 @@ public final class DiscordBot {
     public Subscription addSlashListener(Consumer<DiscordSlashCommand> listener) {
         slashListeners.add(listener);
         return () -> slashListeners.remove(listener);
+    }
+
+    /** Adds a listener for button clicks (already deferred); call {@link Subscription#cancel()} to stop. Delivered on a JDA thread. */
+    public Subscription addButtonListener(Consumer<DiscordButtonClick> listener) {
+        buttonListeners.add(listener);
+        return () -> buttonListeners.remove(listener);
     }
 
     /** The guild (server) id to register slash commands to for instant availability; null/blank registers globally (slow to propagate). */
@@ -153,6 +164,16 @@ public final class DiscordBot {
 
     /** Posts {@code text} to the message channel with the given id; a no-op if not connected or the channel isn't found. */
     public void sendMessage(String channelId, String text) {
+        sendMessage(channelId, text, List.of());
+    }
+
+    /**
+     * Posts {@code text} to the message channel with the given id, with {@code buttons}
+     * attached as a single row (Discord caps a row at 5); a no-op if not connected or the
+     * channel isn't found. Clicks are delivered to {@link #addButtonListener listeners} by
+     * the button's id.
+     */
+    public void sendMessage(String channelId, String text, List<DiscordButtonSpec> buttons) {
         JDA current;
         synchronized (lock) {
             current = jda;
@@ -161,9 +182,18 @@ public final class DiscordBot {
             return;
         }
         MessageChannel channel = current.getChannelById(MessageChannel.class, channelId);
-        if (channel != null) {
-            channel.sendMessage(text).queue();
+        if (channel == null) {
+            return;
         }
+        if (buttons.isEmpty()) {
+            channel.sendMessage(text).queue();
+            return;
+        }
+        List<Button> jdaButtons = new ArrayList<>();
+        for (DiscordButtonSpec button : buttons) {
+            jdaButtons.add(Button.primary(button.id(), button.label()));
+        }
+        channel.sendMessage(text).addActionRow(jdaButtons).queue();
     }
 
     private final class MessageBridge extends ListenerAdapter {
@@ -202,6 +232,22 @@ public final class DiscordBot {
                     event.getUser().getEffectiveName(),
                     reply);
             slashListeners.forEach(listener -> listener.accept(slashCommand));
+        }
+
+        @Override
+        public void onButtonInteraction(ButtonInteractionEvent event) {
+            // Same defer-then-answer-via-hook treatment as slash commands (~15 min to reply).
+            event.deferReply(false).queue();
+            InteractionHook hook = event.getHook();
+            DiscordReply reply = text -> hook.editOriginal(text).queue();
+
+            DiscordButtonClick click = new DiscordButtonClick(
+                    event.getComponentId(),
+                    event.getChannel().getId(),
+                    event.getUser().getId(),
+                    event.getUser().getEffectiveName(),
+                    reply);
+            buttonListeners.forEach(listener -> listener.accept(click));
         }
     }
 
