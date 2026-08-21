@@ -18,6 +18,7 @@ import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
+import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -79,6 +80,7 @@ public final class DiscordBot {
         synchronized (lock) {
             this.jda = built;
         }
+        log.info("Discord bot connected as \"{}\" ({} guild(s) visible)", built.getSelfUser().getName(), built.getGuilds().size());
     }
 
     public void disconnect() {
@@ -89,6 +91,7 @@ public final class DiscordBot {
         }
         if (current != null) {
             current.shutdownNow();
+            log.info("Discord bot disconnected");
         }
     }
 
@@ -179,21 +182,26 @@ public final class DiscordBot {
             current = jda;
         }
         if (current == null) {
+            log.warn("Cannot send message to channel \"{}\": bot is not connected", channelId);
             return;
         }
         MessageChannel channel = current.getChannelById(MessageChannel.class, channelId);
         if (channel == null) {
+            log.warn("Cannot send message to channel \"{}\": no such channel in this bot's cache "
+                    + "(check the channel id, and that the bot has been invited to the server and can see the channel)", channelId);
             return;
         }
-        if (buttons.isEmpty()) {
-            channel.sendMessage(text).queue();
-            return;
+        MessageCreateAction action = channel.sendMessage(text);
+        if (!buttons.isEmpty()) {
+            List<Button> jdaButtons = new ArrayList<>();
+            for (DiscordButtonSpec button : buttons) {
+                jdaButtons.add(Button.primary(button.id(), button.label()));
+            }
+            action = action.addActionRow(jdaButtons);
         }
-        List<Button> jdaButtons = new ArrayList<>();
-        for (DiscordButtonSpec button : buttons) {
-            jdaButtons.add(Button.primary(button.id(), button.label()));
-        }
-        channel.sendMessage(text).addActionRow(jdaButtons).queue();
+        action.queue(
+                sent -> log.info("Sent message {} to channel \"{}\"", sent.getId(), channelId),
+                failure -> log.error("Discord rejected the message to channel \"{}\": {}", channelId, failure.getMessage()));
     }
 
     private final class MessageBridge extends ListenerAdapter {

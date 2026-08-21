@@ -6,6 +6,8 @@ import io.github.jaymcole.housegraph.graph.BaseNode;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
+import io.github.jaymcole.housegraph.logging.Log;
+import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 
 /**
@@ -20,6 +22,8 @@ import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 @Node.Type("discord.DiscordSendMessageNode")
 public class DiscordSendMessageNode extends BaseNode {
 
+    private static final Logger log = Log.get(DiscordSendMessageNode.class);
+
     private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
@@ -31,7 +35,16 @@ public class DiscordSendMessageNode extends BaseNode {
         DiscordBot bot = botInput.getValue();
         String text = message.getValue();
         String channelId = channel.getValue();
-        if (bot == null || channelId == null || channelId.isBlank() || text == null) {
+        if (bot == null) {
+            log.warn("Discord Send Message did nothing: no Bot wired in");
+            return;
+        }
+        if (channelId == null || channelId.isBlank()) {
+            log.warn("Discord Send Message did nothing: Channel is empty");
+            return;
+        }
+        if (text == null) {
+            log.warn("Discord Send Message did nothing: Message is empty");
             return;
         }
         bot.sendMessage(channelId, text);

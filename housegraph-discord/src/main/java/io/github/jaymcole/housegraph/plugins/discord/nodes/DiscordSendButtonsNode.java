@@ -7,6 +7,8 @@ import io.github.jaymcole.housegraph.graph.Edge;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
+import io.github.jaymcole.housegraph.logging.Log;
+import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordButtonClick;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordButtonSpec;
@@ -49,6 +51,8 @@ import java.util.Map;
 @Node.Type("discord.DiscordSendButtonsNode")
 public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvider {
 
+    private static final Logger log = Log.get(DiscordSendButtonsNode.class);
+
     private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
@@ -68,8 +72,19 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         DiscordBot currentBot = botInput.getValue();
         String text = message.getValue();
         String channelId = channel.getValue();
-        if (currentBot == null || channelId == null || channelId.isBlank() || text == null) {
+        if (currentBot == null) {
+            log.warn("Discord Send Buttons did nothing: no Bot wired in");
             activateNone(); // nothing was sent, so no branch — including a button's — should fire
+            return;
+        }
+        if (channelId == null || channelId.isBlank()) {
+            log.warn("Discord Send Buttons did nothing: Channel is empty");
+            activateNone();
+            return;
+        }
+        if (text == null) {
+            log.warn("Discord Send Buttons did nothing: Message is empty");
+            activateNone();
             return;
         }
         List<DiscordButtonSpec> buttons = new ArrayList<>();
@@ -157,8 +172,11 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     private void onClick(DiscordButtonClick click) {
         FlowPort port = buttonOutputs.get(click.buttonId());
         if (port == null) {
-            return; // not one of this node's configured buttons
+            log.debug("Discord Send Buttons ignored a click on \"{}\": not one of this node's configured buttons {}",
+                    click.buttonId(), buttonLabels);
+            return;
         }
+        log.info("Discord Send Buttons firing \"{}\" branch for a click from \"{}\"", click.buttonId(), click.authorName());
         // runFlowBranchToCompletion blocks until the whole downstream branch finishes, so run
         // it off its own thread rather than tying up the JDA gateway thread the click arrived
         // on. The seed sets this specific click's sender/reply directly on the output
