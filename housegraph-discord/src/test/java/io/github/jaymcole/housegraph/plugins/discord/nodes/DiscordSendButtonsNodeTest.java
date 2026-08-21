@@ -18,11 +18,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * This node is both an action (send, via its flow-in) and an event source (a button click, via
- * a wired bot's listener) — {@code process()} tells the two apart with
- * {@code ProcessContext#wasTriggeredVia}, so a click never re-sends the message. Actually
- * sending/receiving isn't exercised here since that needs a live JDA connection (see
- * {@code DiscordSendMessageNodeTest}'s reasoning); the {@code Bot}-wiring and flow-port-shape
- * behaviors, which don't, are.
+ * a wired bot's listener). Unlike {@code DailyTriggerNode}'s Start/Stop, a click can't be told
+ * apart from a plain flow-in trigger via {@code ProcessContext#wasTriggeredVia} — both a real
+ * flow edge arrival at {@code process()} and a manual host-UI test-run produce a populated-or-
+ * empty {@code triggeredVia()} depending only on how the node was reached, and this node's own
+ * click re-entry would look identical to the latter. So {@code process()} unconditionally means
+ * "send" and a click never reaches it at all, instead firing its own branch directly via
+ * {@code runFlowBranchToCompletion}. Actually sending/receiving isn't exercised here since that
+ * needs a live JDA connection (see {@code DiscordSendMessageNodeTest}'s reasoning); the
+ * {@code Bot}-wiring and flow-port-shape behaviors, which don't, are.
  */
 class DiscordSendButtonsNodeTest {
 
@@ -93,7 +97,26 @@ class DiscordSendButtonsNodeTest {
         DiscordSendButtonsNode node = new DiscordSendButtonsNode();
 
         assertDoesNotThrow(() -> node.process(ProcessContext.uncancelled()),
-                "with no bot wired there is nothing to send to, and no flow-in arrival to react to");
+                "with no bot wired there is nothing to send to");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void processingWithAnEmptyTriggeredViaStillAttemptsToSend() {
+        // Regression guard: process() must not gate sending on ctx.wasTriggeredVia(in) — a
+        // manual host-UI test-run of this node also produces an empty triggeredVia(), same as
+        // a real flow-in edge arrival looks from inside process() (see the class doc).
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot(); // unconnected: sendMessage() on it is a safe no-op
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        graph.addNode(source);
+        graph.addNode(node);
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+        ((NodeVariable<String>) inputNamed(node, "Message")).setValue("hello");
+        ((NodeVariable<String>) inputNamed(node, "Channel")).setValue("123");
+
+        assertDoesNotThrow(() -> node.process(ProcessContext.uncancelled()));
     }
 
     @Test

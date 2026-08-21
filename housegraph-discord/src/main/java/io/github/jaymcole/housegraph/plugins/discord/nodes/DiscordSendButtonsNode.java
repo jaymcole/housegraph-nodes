@@ -38,10 +38,12 @@ import java.util.Map;
  * the same wired bot and a matching button label fires this node — the same trade-off the
  * Discord Command node makes for {@code !command} text.
  * <p>
- * {@link #process} distinguishes the two ways it runs: reached via its flow-in, it sends the
- * message and activates only the plain {@code ""} port; reached via {@link #execute(Runnable)}
- * from a click (no flow-in involved), outputs and the matching button's activation were already
- * set just before, so it does nothing further.
+ * A click never re-enters {@link #process}: {@code process()} only ever means "send" (there is
+ * no reliable way to tell "reached via a real flow-in edge" apart from "reached via a click" —
+ * both a plain host-UI test-run of this node and this node's own click re-entry produce an
+ * empty {@link ProcessContext#triggeredVia()}, since neither traverses an actual flow edge). A
+ * click instead calls {@link #runFlowBranchToCompletion(FlowPort, Runnable)} directly on the
+ * matching button port, off a background thread since it blocks until that branch finishes.
  */
 @Display.Name("Discord Send Buttons")
 @Node.Type("discord.DiscordSendButtonsNode")
@@ -63,11 +65,6 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
 
     @Override
     public void process(ProcessContext ctx) {
-        if (!ctx.wasTriggeredVia(in)) {
-            // Reached via a click, not the flow-in: execute() already set the sender/reply
-            // outputs and activated the matching button branch just before this ran.
-            return;
-        }
         DiscordBot currentBot = botInput.getValue();
         String text = message.getValue();
         String channelId = channel.getValue();
@@ -162,19 +159,24 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         if (port == null) {
             return; // not one of this node's configured buttons
         }
-        // Capture everything for this specific click and apply it together inside the pass,
-        // so a burst of clicks can't mix one click's sender/reply with another's.
-        try {
-            execute(() -> {
-                senderId.setValue(click.authorId());
-                senderName.setValue(click.authorName());
-                reply.setValue(click.reply());
-                activate(port);
-            });
-        } catch (IllegalStateException e) {
-            // The node was removed just as the click arrived (event on a Discord thread,
-            // removal on the UI thread); ignore rather than error.
-        }
+        // runFlowBranchToCompletion blocks until the whole downstream branch finishes, so run
+        // it off its own thread rather than tying up the JDA gateway thread the click arrived
+        // on. The seed sets this specific click's sender/reply directly on the output
+        // variables — same as every other event-source node in this library — before the
+        // matching button branch fires.
+        Thread thread = new Thread(() -> {
+            try {
+                runFlowBranchToCompletion(port, () -> {
+                    senderId.setValue(click.authorId());
+                    senderName.setValue(click.authorName());
+                    reply.setValue(click.reply());
+                });
+            } catch (IllegalStateException e) {
+                // The node was removed just as the click arrived, or isn't on a graph; ignore.
+            }
+        }, "discord-button-click-" + click.buttonId());
+        thread.setDaemon(true);
+        thread.start();
     }
 
     @Override
