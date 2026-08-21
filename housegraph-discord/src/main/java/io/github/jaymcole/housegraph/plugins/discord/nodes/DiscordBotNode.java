@@ -96,6 +96,17 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     }
 
     private void connectBot() {
+        if (bot.isConnected()) {
+            // A redundant Connect must be a no-op, not a reconnect. This node's Bot output is
+            // wired as a plain data edge into other nodes (Send Message, Command, ...), and the
+            // engine resolves that edge — re-running THIS node's own process() — every time any
+            // of them run, not just on a genuine user-initiated Connect. Without this guard,
+            // ordinary Discord activity (e.g. every incoming message a Discord Command node
+            // reacts to) was silently forcing a full reconnect and slash-command re-sync each
+            // time, which is what was hammering Discord's command-sync endpoint into a 429 and
+            // leaving the actual connection never stable long enough to send anything.
+            return;
+        }
         String token = resolveToken();
         if (token == null || token.isBlank()) {
             throw new IllegalStateException("Pick a token secret first");
