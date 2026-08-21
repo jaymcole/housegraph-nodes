@@ -2,6 +2,7 @@ package io.github.jaymcole.housegraph.plugins.discord;
 
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
+import io.github.jaymcole.housegraph.resource.Subscription;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
@@ -33,11 +35,13 @@ import java.util.function.Consumer;
  * <ul>
  *   <li>{@link #connect} logs in and blocks until the gateway is ready (call it off the
  *       UI thread); {@link #disconnect} shuts it down.</li>
- *   <li>incoming (non-bot) messages are forwarded to {@link #setMessageHandler a handler}
- *       — the bot node routes those into HouseGraph's resource registry as events.</li>
+ *   <li>incoming (non-bot) messages are delivered to every {@link #addMessageListener
+ *       listener} — one instance is meant to be wired, via the Discord Bot node's output
+ *       port, into several command nodes at once, so listeners are a list rather than a
+ *       single handler.</li>
  *   <li>slash commands are registered via {@link #syncCommands} and their invocations
- *       forwarded to {@link #setSlashHandler a handler}, deferred so a slow graph has
- *       time (~15 min) to answer through the {@link DiscordReply} handle.</li>
+ *       delivered to every {@link #addSlashListener listener}, deferred so a slow graph
+ *       has time (~15 min) to answer through the {@link DiscordReply} handle.</li>
  *   <li>{@link #sendMessage} posts to a channel by id.</li>
  * </ul>
  * Reading message content needs the privileged <b>MESSAGE_CONTENT</b> intent enabled for
@@ -52,10 +56,8 @@ public final class DiscordBot {
     private volatile String guildId;
     /** Command name (lowercase) -> whether its reply is ephemeral; consulted when deferring an interaction. */
     private final Map<String, Boolean> ephemeralByCommand = new ConcurrentHashMap<>();
-    private volatile Consumer<DiscordMessage> messageHandler = message -> {
-    };
-    private volatile Consumer<DiscordSlashCommand> slashHandler = command -> {
-    };
+    private final CopyOnWriteArrayList<Consumer<DiscordMessage>> messageListeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<Consumer<DiscordSlashCommand>> slashListeners = new CopyOnWriteArrayList<>();
 
     /**
      * Logs in with {@code token} and blocks until the gateway is ready. Call from a
@@ -91,16 +93,16 @@ public final class DiscordBot {
         }
     }
 
-    /** Sets where incoming (non-bot) messages are delivered. Called back on a JDA thread. */
-    public void setMessageHandler(Consumer<DiscordMessage> handler) {
-        this.messageHandler = handler == null ? message -> {
-        } : handler;
+    /** Adds a listener for incoming (non-bot) messages; call {@link Subscription#cancel()} to stop. Delivered on a JDA thread. */
+    public Subscription addMessageListener(Consumer<DiscordMessage> listener) {
+        messageListeners.add(listener);
+        return () -> messageListeners.remove(listener);
     }
 
-    /** Sets where slash-command invocations are delivered (already deferred). Called back on a JDA thread. */
-    public void setSlashHandler(Consumer<DiscordSlashCommand> handler) {
-        this.slashHandler = handler == null ? command -> {
-        } : handler;
+    /** Adds a listener for slash-command invocations (already deferred); call {@link Subscription#cancel()} to stop. Delivered on a JDA thread. */
+    public Subscription addSlashListener(Consumer<DiscordSlashCommand> listener) {
+        slashListeners.add(listener);
+        return () -> slashListeners.remove(listener);
     }
 
     /** The guild (server) id to register slash commands to for instant availability; null/blank registers globally (slow to propagate). */
@@ -170,11 +172,12 @@ public final class DiscordBot {
             if (event.getAuthor().isBot()) {
                 return; // ignore our own and other bots' messages
             }
-            messageHandler.accept(new DiscordMessage(
+            DiscordMessage message = new DiscordMessage(
                     event.getMessage().getContentDisplay(),
                     event.getChannel().getId(),
                     event.getAuthor().getId(),
-                    event.getAuthor().getEffectiveName()));
+                    event.getAuthor().getEffectiveName());
+            messageListeners.forEach(listener -> listener.accept(message));
         }
 
         @Override
@@ -191,13 +194,14 @@ public final class DiscordBot {
             for (OptionMapping option : event.getOptions()) {
                 options.put(option.getName(), option.getAsString());
             }
-            slashHandler.accept(new DiscordSlashCommand(
+            DiscordSlashCommand slashCommand = new DiscordSlashCommand(
                     event.getName(),
                     options,
                     event.getChannel().getId(),
                     event.getUser().getId(),
                     event.getUser().getEffectiveName(),
-                    reply));
+                    reply);
+            slashListeners.forEach(listener -> listener.accept(slashCommand));
         }
     }
 

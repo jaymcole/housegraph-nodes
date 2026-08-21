@@ -3,20 +3,19 @@ package io.github.jaymcole.housegraph.plugins.discord.nodes;
 import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
+import io.github.jaymcole.housegraph.graph.FlowPort;
+import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 import io.github.jaymcole.housegraph.plugins.discord.SlashCommandRegistry;
-import io.github.jaymcole.housegraph.resource.ResourceRegistry;
 import io.github.jaymcole.housegraph.sdk.AutoStartable;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import io.github.jaymcole.housegraph.sdk.Secrets;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
@@ -25,14 +24,24 @@ import java.util.Map;
 
 /**
  * The Discord bot resource: a long-lived {@link DiscordBot} connection, managed like a
- * resource-node pattern node, but real. Its token comes from HouseGraph's encrypted secret
- * store (pick which secret holds it), so the token is never wired or saved in the graph. While
- * live it registers itself under a name so other Discord nodes reference it from
- * anywhere, and it forwards incoming messages into the resource registry as events.
+ * resource-node pattern node, but real. Every setting — name, token secret, guild id — is
+ * an ordinary data input, typed in directly on the node; the token itself never touches an
+ * input value, since {@code Token Secret} only carries the key into HouseGraph's encrypted
+ * secret store (see {@link Secrets}), resolved fresh on every Connect. Once connected, the
+ * {@code Bot} output carries this node's {@link DiscordBot} handle to any Discord Command,
+ * Discord Slash Command, or Discord Send Message node wired to it — those subscribe or send
+ * directly against the wired instance rather than looking a bot up by name.
  * <p>
- * Liveness is user-driven (Connect/Disconnect), independent of graph flow; the actual
- * gateway login runs off the UI thread so the app stays responsive. The connection is
- * torn down on {@link #onRemoved()} (node deleted or app shutdown).
+ * Two flow-in ports drive the connection lifecycle, both landing in {@link #process}, which
+ * tells them apart with {@link ProcessContext#wasTriggeredVia(FlowPort)}: {@code Connect}
+ * (also the default for a plain pull, e.g. the Connect button or {@link #autoStartIfWasRunning()})
+ * resolves the token and guild id and logs in; {@code Disconnect} tears the gateway connection
+ * down. The inline Connect/Disconnect buttons are a convenience, not a separate code path —
+ * either reaches the same {@link #process}.
+ * <p>
+ * Liveness is otherwise user-driven, independent of graph flow; the actual gateway login runs
+ * off the UI thread so the app stays responsive. The connection is torn down on
+ * {@link #onRemoved()} (node deleted or app shutdown).
  * <p>
  * If it was connected when the graph was saved, it reconnects automatically on load: the
  * connected flag rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses
@@ -43,43 +52,90 @@ import java.util.Map;
 public class DiscordBotNode extends BaseNode implements NodeContentProvider, AutoStartable {
 
     private static final Logger log = Log.get(DiscordBotNode.class);
+    private static final String DEFAULT_NAME = "discord";
 
     private final DiscordBot bot = new DiscordBot();
-    private String resourceName = "discord";
-    private String tokenSecret;
-    private String guildId;
+
+    private final NodeVariable<String> nameInput =
+            withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
+    private final NodeVariable<String> tokenSecretInput =
+            new NodeVariable<>("Token Secret", String.class, true).required();
+    private final NodeVariable<String> guildIdInput =
+            new NodeVariable<>("Guild ID", String.class, true);
+    private final NodeVariable<DiscordBot> botOutput =
+            withDefault(new NodeVariable<>("Bot", DiscordBot.class).transientValue(), bot);
+
+    private final FlowPort connectIn = new FlowPort("Connect", FlowPort.Direction.IN);
+    private final FlowPort disconnectIn = new FlowPort("Disconnect", FlowPort.Direction.IN);
+
     /** True when the bot was connected at the moment the loaded graph was saved; drives {@link #autoStartIfWasRunning()}. */
     private boolean wasConnected;
 
-    private TextField nameField;
-    private ComboBox<String> tokenChooser;
-    private TextField guildField;
     private Button connectButton;
     private Button disconnectButton;
     private Label statusLabel;
 
+    /**
+     * Resolves the token and guild id fresh, then does exactly one of two things depending on
+     * which flow-in port brought control here: {@link #disconnectIn} tears the gateway down;
+     * anything else — including {@link #connectIn}, and an empty {@code triggeredVia()} (a plain
+     * {@link #beginProcessing()} pull, e.g. the Connect button or {@link #autoStartIfWasRunning()})
+     * — logs in. A missing token secret or a login failure throws with a message safe to show in
+     * the UI (never the token itself), which the engine surfaces as this node's error for
+     * {@link #onExecuted()}/the button handlers.
+     */
     @Override
     public void process(ProcessContext ctx) {
+        if (ctx.wasTriggeredVia(disconnectIn)) {
+            bot.disconnect();
+            return;
+        }
+        connectBot();
+    }
+
+    private void connectBot() {
+        String secretKey = tokenSecretInput.getValue();
+        String token = secretKey == null ? null : Secrets.get(secretKey);
+        if (token == null) {
+            throw new IllegalStateException("Pick a token secret first");
+        }
+        try {
+            bot.connect(token);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Discord connect failed: {}", e);
+            throw new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
+        } catch (RuntimeException e) {
+            // The exception text won't contain the token, but keep the UI message generic
+            // and log only the type/message, never the token itself.
+            log.error("Discord connect failed: {}", e);
+            throw new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
+        }
+        bot.setGuildId(guildIdInput.getValue());
+        bot.syncCommands(SlashCommandRegistry.shared().commandsFor(bot));
     }
 
     @Override
     public void configureInputs() {
+        addInput(nameInput);
+        addInput(tokenSecretInput);
+        addInput(guildIdInput);
     }
 
     @Override
     public void configureOutputs() {
+        addOutput(botOutput);
+    }
+
+    @Override
+    public void configureFlowInputs() {
+        addFlowInput(connectIn);
+        addFlowInput(disconnectIn);
     }
 
     @Override
     public Map<String, String> saveState() {
         Map<String, String> state = new HashMap<>();
-        state.put("name", resourceName);
-        if (tokenSecret != null) {
-            state.put("token", tokenSecret);
-        }
-        if (guildId != null) {
-            state.put("guild", guildId);
-        }
         if (bot.isConnected()) {
             state.put("running", "true");
         }
@@ -88,12 +144,21 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
 
     @Override
     public void loadState(Map<String, String> state) {
-        String name = state.get("name");
-        if (name != null && !name.isBlank()) {
-            resourceName = name;
+        // Pre-input-port saves kept these fields in this custom state map; migrate each onto its
+        // new port so an old graph doesn't lose its settings (applyValues() no-ops afterward for
+        // such a save, since its "inputs" array has no entry for a port that didn't exist yet).
+        String legacyName = emptyToNull(state.get("name"));
+        if (legacyName != null) {
+            nameInput.setValue(legacyName);
         }
-        tokenSecret = emptyToNull(state.get("token"));
-        guildId = emptyToNull(state.get("guild"));
+        String legacyToken = emptyToNull(state.get("token"));
+        if (legacyToken != null) {
+            tokenSecretInput.setValue(legacyToken);
+        }
+        String legacyGuild = emptyToNull(state.get("guild"));
+        if (legacyGuild != null) {
+            guildIdInput.setValue(legacyGuild);
+        }
         wasConnected = Boolean.parseBoolean(state.get("running"));
     }
 
@@ -110,38 +175,12 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     }
 
     @Override
-    protected void onActivated() {
-        bot.setMessageHandler(message -> ResourceRegistry.shared().publish(resourceName, message));
-        bot.setSlashHandler(command -> ResourceRegistry.shared().publish(resourceName, command));
-        ResourceRegistry.shared().register(resourceName, bot);
-    }
-
-    @Override
     protected void onRemoved() {
-        ResourceRegistry.shared().unregister(resourceName);
         bot.disconnect();
     }
 
     @Override
     public javafx.scene.Node createNodeContent() {
-        nameField = new TextField(resourceName);
-        nameField.setPromptText("Bot name");
-        nameField.textProperty().addListener((obs, old, value) -> rename(value));
-
-        tokenChooser = new ComboBox<>();
-        tokenChooser.setPromptText("Token secret…");
-        tokenChooser.setMaxWidth(Double.MAX_VALUE);
-        tokenChooser.getItems().setAll(Secrets.keys());
-        if (tokenSecret != null) {
-            tokenChooser.setValue(tokenSecret);
-        }
-        tokenChooser.setOnShowing(e -> tokenChooser.getItems().setAll(Secrets.keys()));
-        tokenChooser.setOnAction(e -> tokenSecret = tokenChooser.getValue());
-
-        guildField = new TextField(guildId == null ? "" : guildId);
-        guildField.setPromptText("Guild ID (optional, for instant slash commands)");
-        guildField.textProperty().addListener((obs, old, value) -> guildId = emptyToNull(value));
-
         connectButton = new Button("Connect");
         connectButton.setMaxWidth(Double.MAX_VALUE);
         connectButton.setOnAction(e -> connect());
@@ -155,46 +194,32 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
         HBox buttons = new HBox(6, connectButton, disconnectButton);
-        return new VBox(4, nameField, tokenChooser, guildField, buttons, statusLabel);
+        return new VBox(4, buttons, statusLabel);
     }
 
-    private void rename(String newName) {
-        ResourceRegistry.shared().unregister(resourceName);
-        resourceName = newName;
-        ResourceRegistry.shared().register(resourceName, bot);
-    }
-
+    /**
+     * Runs {@link #process} via {@link #beginProcessing()} on a background thread — a plain pull, so
+     * {@code ctx.triggeredVia()} reads empty and {@link #process} defaults to its Connect behaviour,
+     * exactly like a wired Connect arrival. UI feedback is handled here rather than left to
+     * {@link #onExecuted()} so a failure can report the specific exception message immediately.
+     */
     private void connect() {
-        String token = resolveToken();
-        if (token == null) {
-            statusLabel.setText("Pick a token secret first");
-            return;
-        }
-        setEditingLocked(true);
         connectButton.setDisable(true);
         statusLabel.setText("Connecting…");
 
         Thread thread = new Thread(() -> {
-            try {
-                bot.connect(token);
-                // Register the slash commands declared for this bot (see SlashCommandRegistry).
-                bot.setGuildId(guildId);
-                bot.syncCommands(SlashCommandRegistry.shared().commandsFor(resourceName));
-                Platform.runLater(() -> {
-                    statusLabel.setText("Connected as \"" + resourceName + "\"");
-                    disconnectButton.setDisable(false);
-                });
-            } catch (Exception ex) {
-                // The exception text won't contain the token, but keep the UI message
-                // generic and log only the type/message, never the token itself.
-                log.error("Discord connect failed: {}", ex);
-                Platform.runLater(() -> {
-                    statusLabel.setText("Connect failed — check token & MESSAGE_CONTENT intent");
-                    setEditingLocked(false);
+            beginProcessing();
+            Throwable error = getLastError();
+            Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(error.getMessage());
                     connectButton.setDisable(false);
-                });
-            }
-        }, "discord-connect-" + resourceName);
+                } else {
+                    statusLabel.setText("Connected as \"" + currentName() + "\"");
+                    disconnectButton.setDisable(false);
+                }
+            });
+        }, "discord-connect-" + currentName());
         thread.setDaemon(true);
         thread.start();
     }
@@ -202,19 +227,46 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     private void disconnect() {
         bot.disconnect();
         statusLabel.setText("Disconnected");
-        setEditingLocked(false);
         connectButton.setDisable(false);
         disconnectButton.setDisable(true);
     }
 
-    private void setEditingLocked(boolean locked) {
-        nameField.setDisable(locked);
-        tokenChooser.setDisable(locked);
-        guildField.setDisable(locked);
+    /**
+     * Reflects the outcome of any {@code process()} pass — a Connect or Disconnect arriving along a
+     * wired flow edge, or a plain pull like the button handlers' own {@link #beginProcessing()} call
+     * racing to update the same label — in the status label/buttons. Idempotent: both paths compute
+     * the same text from {@link DiscordBot#isConnected()}/{@link #getLastError()}, so whichever runs
+     * last leaves the correct state either way. Reached on the FX thread (the engine's callback
+     * executor); a no-op if the node's UI was never built.
+     */
+    @Override
+    protected void onExecuted() {
+        if (statusLabel == null) {
+            return;
+        }
+        Throwable error = getLastError();
+        if (error != null) {
+            statusLabel.setText(error.getMessage());
+        } else if (bot.isConnected()) {
+            statusLabel.setText("Connected as \"" + currentName() + "\"");
+        } else {
+            statusLabel.setText("Disconnected");
+        }
+        connectButton.setDisable(bot.isConnected());
+        disconnectButton.setDisable(!bot.isConnected());
     }
 
-    private String resolveToken() {
-        return tokenSecret == null ? null : Secrets.get(tokenSecret);
+    private String currentName() {
+        return valueOr(nameInput.getValue(), DEFAULT_NAME);
+    }
+
+    private static <T> NodeVariable<T> withDefault(NodeVariable<T> variable, T value) {
+        variable.setValue(value);
+        return variable;
+    }
+
+    private static String valueOr(String value, String fallback) {
+        return (value == null || value.isBlank()) ? fallback : value;
     }
 
     private static String emptyToNull(String value) {

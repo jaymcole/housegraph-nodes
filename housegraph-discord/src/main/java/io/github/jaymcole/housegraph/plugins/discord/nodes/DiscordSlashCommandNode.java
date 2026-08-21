@@ -3,16 +3,17 @@ package io.github.jaymcole.housegraph.plugins.discord.nodes;
 import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
+import io.github.jaymcole.housegraph.graph.Edge;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.plugins.discord.CommandOption;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordOptionType;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordReply;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordSlashCommand;
 import io.github.jaymcole.housegraph.plugins.discord.SlashCommandRegistry;
 import io.github.jaymcole.housegraph.plugins.discord.SlashCommandSpec;
-import io.github.jaymcole.housegraph.resource.ResourceRegistry;
 import io.github.jaymcole.housegraph.resource.Subscription;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import javafx.scene.control.Button;
@@ -37,11 +38,14 @@ import java.util.Map;
  * plus {@code Channel}, sender, and a {@code Reply} handle. When someone runs the command,
  * it fires its flow-out with each option's value on its matching port.
  * <p>
- * Changing the options {@link #rebuildPorts() rebuilds this node's ports} (edges to
- * surviving options reconnect by name). The command is <em>declared</em> into
- * {@link SlashCommandRegistry} and registered when the bot connects — so set up commands,
- * then connect; a change afterward (options, ephemeral, name) needs a reconnect. Option
- * and command names are lowercased to satisfy Discord.
+ * Wire a Discord Bot node's {@code Bot} output into this node's {@code Bot} input;
+ * {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} (re)subscribe against whatever
+ * {@link DiscordBot} is currently on the other end. Changing the options
+ * {@link #rebuildPorts() rebuilds this node's ports} (edges to surviving options reconnect
+ * by name). The command is <em>declared</em> into {@link SlashCommandRegistry} against the
+ * wired bot instance and registered when that bot connects — so wire the bot and set up
+ * commands, then connect; a change afterward (options, ephemeral, name) needs a reconnect.
+ * Option and command names are lowercased to satisfy Discord.
  */
 @Display.Name("Discord Slash Command")
 @Node.Type("discord.DiscordSlashCommandNode")
@@ -49,6 +53,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
 
     private static final String DESCRIPTION = "HouseGraph command";
 
+    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class);
     private final NodeVariable<String> senderId = new NodeVariable<>("Sender ID", String.class);
     private final NodeVariable<String> senderName = new NodeVariable<>("Sender Name", String.class);
@@ -57,10 +62,10 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
     private final List<CommandOption> options = new ArrayList<>();
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 
-    private String resourceName;
+    private DiscordBot bot;
     private String command = "command";
     private boolean ephemeral;
-    private String declaredBot;
+    private DiscordBot declaredBot;
     private String declaredCommand;
     private Subscription subscription;
 
@@ -71,6 +76,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
 
     @Override
     public void configureInputs() {
+        addInput(botInput);
     }
 
     @Override
@@ -100,9 +106,6 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         state.put("command", command);
         state.put("ephemeral", Boolean.toString(ephemeral));
         state.put("options", formatOptions(options));
-        if (resourceName != null) {
-            state.put("resource", resourceName);
-        }
         return state;
     }
 
@@ -115,12 +118,20 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         ephemeral = Boolean.parseBoolean(state.get("ephemeral"));
         options.clear();
         options.addAll(parseOptions(state.get("options")));
-        resourceName = emptyToNull(state.get("resource"));
     }
 
     @Override
-    protected void onActivated() {
-        subscribeTo(resourceName);
+    protected void onInputEdgeAdded(Edge edge) {
+        if (edge.getTargetVariable() == botInput) {
+            subscribeTo((DiscordBot) edge.getSourceVariable().getValue());
+        }
+    }
+
+    @Override
+    protected void onInputEdgeRemoved(Edge edge) {
+        if (edge.getTargetVariable() == botInput) {
+            subscribeTo(null);
+        }
     }
 
     @Override
@@ -128,19 +139,16 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         subscribeTo(null);
     }
 
-    private void subscribeTo(String name) {
+    private void subscribeTo(DiscordBot newBot) {
         if (subscription != null) {
             subscription.cancel();
             subscription = null;
         }
-        resourceName = name;
+        bot = newBot;
+        botInput.setValue(newBot);
         redeclare();
-        if (name != null) {
-            subscription = ResourceRegistry.shared().subscribe(name, payload -> {
-                if (payload instanceof DiscordSlashCommand slash) {
-                    onCommand(slash);
-                }
-            });
+        if (bot != null) {
+            subscription = bot.addSlashListener(this::onCommand);
         }
     }
 
@@ -150,8 +158,8 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             SlashCommandRegistry.shared().withdraw(declaredBot, declaredCommand);
         }
         String name = normalizedCommand();
-        if (resourceName != null && name != null) {
-            declaredBot = resourceName;
+        if (bot != null && name != null) {
+            declaredBot = bot;
             declaredCommand = name;
             SlashCommandRegistry.shared().declare(declaredBot,
                     new SlashCommandSpec(name, DESCRIPTION, ephemeral, new ArrayList<>(options)));
@@ -197,16 +205,6 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             redeclare();
         });
 
-        ComboBox<String> botChooser = new ComboBox<>();
-        botChooser.setPromptText("From bot…");
-        botChooser.setMaxWidth(Double.MAX_VALUE);
-        botChooser.getItems().setAll(ResourceRegistry.shared().activeNames());
-        if (resourceName != null) {
-            botChooser.setValue(resourceName);
-        }
-        botChooser.setOnShowing(e -> botChooser.getItems().setAll(ResourceRegistry.shared().activeNames()));
-        botChooser.setOnAction(e -> subscribeTo(botChooser.getValue()));
-
         CheckBox ephemeralBox = new CheckBox("Ephemeral reply");
         ephemeralBox.setStyle("-fx-text-fill: #dddddd; -fx-font-size: 11px;");
         ephemeralBox.setSelected(ephemeral);
@@ -232,7 +230,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         Label optionsLabel = new Label("Options");
         optionsLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
-        return new VBox(4, commandField, botChooser, ephemeralBox,
+        return new VBox(4, commandField, ephemeralBox,
                 optionsLabel, optionRows, new HBox(6, addButton, applyButton));
     }
 
@@ -314,9 +312,5 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             text.append(option.name()).append(':').append(option.type().name().toLowerCase(Locale.ROOT));
         }
         return text.toString();
-    }
-
-    private static String emptyToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value;
     }
 }
