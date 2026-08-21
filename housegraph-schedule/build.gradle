@@ -1,0 +1,10 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-schedule'
+    libraryName = 'Schedule'
+    description = 'Calendar-based triggers: fire flow on selected days of the week at a chosen time.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.schedule.nodes']
+}

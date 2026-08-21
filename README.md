@@ -14,6 +14,7 @@ they just share a build and a release.
 | `housegraph-github` | Git Sync | JGit |
 | `housegraph-experimental` | Lightbulb | nothing |
 | `housegraph-filesystem` | Create Folder | nothing |
+| `housegraph-schedule` | Daily Trigger | nothing |
 
 ## Installing
 
