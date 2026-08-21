@@ -25,10 +25,11 @@ import java.util.Map;
 /**
  * The Discord bot resource: a long-lived {@link DiscordBot} connection, managed like a
  * resource-node pattern node, but real. Every setting — name, token secret, guild id — is
- * an ordinary data input, typed in directly on the node; the token itself never touches an
- * input value, since {@code Token Secret} only carries the key into HouseGraph's encrypted
- * secret store (see {@link Secrets}), resolved fresh on every Connect. Once connected, the
- * {@code Bot} output carries this node's {@link DiscordBot} handle to any Discord Command,
+ * an ordinary data input. {@code Token Secret} carries the token itself, not a key to look
+ * up: wire a secret-resolving node (e.g. HouseGraph's Secret Loader) into it so the actual
+ * value never sits in this node's own state, or type it in directly for a quick local test —
+ * either way {@link #process} reads it as-is at Connect, with no lookup of its own. Once
+ * connected, the {@code Bot} output carries this node's {@link DiscordBot} handle to any Discord Command,
  * Discord Slash Command, or Discord Send Message node wired to it — those subscribe or send
  * directly against the wired instance rather than looking a bot up by name.
  * <p>
@@ -45,7 +46,8 @@ import java.util.Map;
  * <p>
  * If it was connected when the graph was saved, it reconnects automatically on load: the
  * connected flag rides along in {@link #saveState()} and {@link #autoStartIfWasRunning()} presses
- * Connect for the user, resolving the token from the secret store as usual (see {@link AutoStartable}).
+ * Connect for the user, reading whatever is currently wired into {@code Token Secret} as usual
+ * (see {@link AutoStartable}).
  */
 @Display.Name("Discord Bot")
 @Node.Type("discord.DiscordBotNode")
@@ -59,7 +61,7 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     private final NodeVariable<String> nameInput =
             withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
     private final NodeVariable<String> tokenSecretInput =
-            new NodeVariable<>("Token Secret", String.class, true).required();
+            new NodeVariable<>("Token Secret", String.class, true).required().markSecret();
     private final NodeVariable<String> guildIdInput =
             new NodeVariable<>("Guild ID", String.class, true);
     private final NodeVariable<DiscordBot> botOutput =
@@ -94,9 +96,8 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     }
 
     private void connectBot() {
-        String secretKey = tokenSecretInput.getValue();
-        String token = secretKey == null ? null : Secrets.get(secretKey);
-        if (token == null) {
+        String token = resolveToken();
+        if (token == null || token.isBlank()) {
             throw new IllegalStateException("Pick a token secret first");
         }
         try {
@@ -153,7 +154,11 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
         }
         String legacyToken = emptyToNull(state.get("token"));
         if (legacyToken != null) {
-            tokenSecretInput.setValue(legacyToken);
+            // Pre-port saves stored the secret's *key*, resolved via Secrets.get() at Connect
+            // time; Token Secret now carries the resolved value itself, so resolve the legacy
+            // key once here rather than teaching process() a lookup it no longer needs.
+            String resolvedToken = Secrets.get(legacyToken);
+            tokenSecretInput.setValue(resolvedToken != null ? resolvedToken : legacyToken);
         }
         String legacyGuild = emptyToNull(state.get("guild"));
         if (legacyGuild != null) {
@@ -258,6 +263,15 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
 
     private String currentName() {
         return valueOr(nameInput.getValue(), DEFAULT_NAME);
+    }
+
+    /**
+     * Test seam: {@code Token Secret}'s current value, read exactly as {@link #connectBot()}
+     * reads it — as the token itself, with no lookup of its own (that's what wiring in a
+     * secret-resolving node, e.g. Secret Loader, is for).
+     */
+    String resolveToken() {
+        return tokenSecretInput.getValue();
     }
 
     private static <T> NodeVariable<T> withDefault(NodeVariable<T> variable, T value) {
