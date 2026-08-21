@@ -73,12 +73,17 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     private DiscordBot bot;
     private Subscription subscription;
 
+    public DiscordSendButtonsNode() {
+        log.info("Discord Send Buttons [{}] constructed", System.identityHashCode(this));
+    }
+
     @Override
     public void process(ProcessContext ctx) {
         String text = message.getValue();
         String channelId = channel.getValue();
         if (bot == null) {
-            log.warn("Discord Send Buttons did nothing: no Bot wired in");
+            log.warn("Discord Send Buttons [{}] did nothing: no Bot wired in (botInput.getValue()={})",
+                    System.identityHashCode(this), botInput.getValue());
             activateNone(); // nothing was sent, so no branch — including a button's — should fire
             return;
         }
@@ -169,6 +174,8 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         }
         bot = newBot;
         botInput.setValue(newBot);
+        log.info("Discord Send Buttons [{}] {} Bot from a wired edge (bot={})",
+                System.identityHashCode(this), newBot != null ? "captured" : "cleared", newBot);
         if (bot != null) {
             subscription = bot.addButtonListener(this::onClick);
         }

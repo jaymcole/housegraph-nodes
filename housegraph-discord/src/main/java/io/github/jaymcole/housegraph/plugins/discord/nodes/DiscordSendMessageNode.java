@@ -43,12 +43,17 @@ public class DiscordSendMessageNode extends BaseNode {
 
     private DiscordBot bot;
 
+    public DiscordSendMessageNode() {
+        log.info("Discord Send Message [{}] constructed", System.identityHashCode(this));
+    }
+
     @Override
     public void process(ProcessContext ctx) {
         String text = message.getValue();
         String channelId = channel.getValue();
         if (bot == null) {
-            log.warn("Discord Send Message did nothing: no Bot wired in");
+            log.warn("Discord Send Message [{}] did nothing: no Bot wired in (botInput.getValue()={})",
+                    System.identityHashCode(this), botInput.getValue());
             return;
         }
         if (channelId == null || channelId.isBlank()) {
@@ -88,12 +93,15 @@ public class DiscordSendMessageNode extends BaseNode {
         if (edge.getTargetVariable() == botInput) {
             bot = (DiscordBot) edge.getSourceVariable().getValue();
             botInput.setValue(bot);
+            log.info("Discord Send Message [{}] captured Bot from a wired edge (bot={})",
+                    System.identityHashCode(this), bot);
         }
     }
 
     @Override
     protected void onInputEdgeRemoved(Edge edge) {
         if (edge.getTargetVariable() == botInput) {
+            log.info("Discord Send Message [{}] Bot edge removed, clearing captured bot", System.identityHashCode(this));
             bot = null;
             botInput.setValue(null);
         }
