@@ -148,6 +148,33 @@ class DiscordSendButtonsNodeTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void processingSelfHealsWhenOnInputEdgeAddedHasNotCaughtUpYet() {
+        // Regression guard: onInputEdgeAdded's callback is dispatched asynchronously and, for an
+        // edge restored from a loaded graph, isn't reliably caught up by the time this node can
+        // be triggered. Simulate that by setting botInput's value directly rather than through
+        // registerEdge (Reply's own wiring, a different hook, is registered normally) — process()
+        // should still (re)subscribe from the pulled value. Ephemeral-vs-not is the observable
+        // signal here specifically because it discriminates: "false" only happens if the
+        // subscription/declaration path actually ran, unlike the ephemeral default.
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes"));
+        node.reconfigure();
+        ReplySink sink = new ReplySink();
+        graph.addNode(node);
+        graph.addNode(sink);
+        graph.registerEdge(new Edge(node, outputNamed(node, "Reply"), sink, inputNamed(sink, "Reply")));
+        ((NodeVariable<DiscordBot>) inputNamed(node, "Bot")).setValue(bot);
+
+        node.process(ProcessContext.uncancelled());
+
+        assertFalse(bot.isButtonEphemeral("Yes"),
+                "process() should self-heal the click subscription/ephemeral declaration from the pulled Bot value");
+    }
+
+    @Test
     void wiringABotEdgeCapturesItOnTheBotInput() {
         NodeGraph graph = new NodeGraph();
         DiscordBot bot = new DiscordBot();

@@ -3,7 +3,6 @@ package io.github.jaymcole.housegraph.plugins.discord.nodes;
 import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
-import io.github.jaymcole.housegraph.graph.Edge;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
@@ -19,15 +18,14 @@ import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
  * in the channel the command came from, or type a fixed channel id for a set destination.
  * Control flows through, so you can chain more work after sending.
  * <p>
- * {@code Bot} is captured eagerly via {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved}
- * into a plain field, the same way every other node in this library that consumes a wired
- * {@code DiscordBot} handle does (see {@code DiscordCommandNode}) — {@code process()} reads
- * that field, not {@code botInput.getValue()}. A {@code DiscordBot} is a live, long-lived
- * resource wired in from a node that isn't part of this node's own flow-triggered pass (it was
- * connected in a separate, already-finished pass), so relying on the normal per-pass data-edge
- * pull to resolve it here is unreliable — it would also re-invoke the Bot node's own
- * {@code process()} as a side effect of resolving the dependency, attempting a fresh reconnect
- * on every trigger.
+ * {@code Bot} is read via the normal {@code botInput.getValue()} pull, not captured eagerly
+ * through {@code onInputEdgeAdded} — this node only needs the current value at the moment it
+ * sends, and that hook's callback is dispatched asynchronously (and, for an edge restored from
+ * a loaded graph rather than freshly drawn, isn't reliably caught up by the time a node can be
+ * triggered), so relying on it left this node seeing a stale/absent Bot right after a graph
+ * load. The plain pull is re-evaluated fresh on every {@code process()} call regardless. This is
+ * safe now that {@code DiscordBotNode#connectBot} is idempotent — resolving Bot as a data
+ * dependency no longer forces a reconnect as a side effect.
  */
 @Display.Name("Discord Send Message")
 @Node.Type("discord.DiscordSendMessageNode")
@@ -41,19 +39,13 @@ public class DiscordSendMessageNode extends BaseNode {
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 
-    private DiscordBot bot;
-
-    public DiscordSendMessageNode() {
-        log.info("Discord Send Message [{}] constructed", System.identityHashCode(this));
-    }
-
     @Override
     public void process(ProcessContext ctx) {
+        DiscordBot bot = botInput.getValue();
         String text = message.getValue();
         String channelId = channel.getValue();
         if (bot == null) {
-            log.warn("Discord Send Message [{}] did nothing: no Bot wired in (botInput.getValue()={})",
-                    System.identityHashCode(this), botInput.getValue());
+            log.warn("Discord Send Message did nothing: no Bot wired in");
             return;
         }
         if (channelId == null || channelId.isBlank()) {
@@ -86,24 +78,5 @@ public class DiscordSendMessageNode extends BaseNode {
     @Override
     public void configureFlowOutputs() {
         addFlowOutput(out);
-    }
-
-    @Override
-    protected void onInputEdgeAdded(Edge edge) {
-        if (edge.getTargetVariable() == botInput) {
-            bot = (DiscordBot) edge.getSourceVariable().getValue();
-            botInput.setValue(bot);
-            log.info("Discord Send Message [{}] captured Bot from a wired edge (bot={})",
-                    System.identityHashCode(this), bot);
-        }
-    }
-
-    @Override
-    protected void onInputEdgeRemoved(Edge edge) {
-        if (edge.getTargetVariable() == botInput) {
-            log.info("Discord Send Message [{}] Bot edge removed, clearing captured bot", System.identityHashCode(this));
-            bot = null;
-            botInput.setValue(null);
-        }
     }
 }

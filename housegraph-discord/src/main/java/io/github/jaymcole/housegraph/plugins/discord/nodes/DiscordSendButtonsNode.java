@@ -47,11 +47,15 @@ import java.util.Map;
  * click instead calls {@link #runFlowBranchToCompletion(FlowPort, Runnable)} directly on the
  * matching button port, off a background thread since it blocks until that branch finishes.
  * <p>
- * {@code Bot} is captured eagerly via {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} into
- * a plain field (needed anyway for the click subscription); {@code process()} reads that field,
- * not {@code botInput.getValue()} — the same reasoning as {@code DiscordSendMessageNode}: a
- * {@code DiscordBot} is a live resource wired in from a node outside this node's own
- * flow-triggered pass, so pulling it via the normal per-pass data-edge resolution is unreliable.
+ * {@code Bot} is captured via {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} into a plain
+ * field, needed regardless of process() to (re)subscribe the click listener the moment the wire
+ * changes rather than only when this node happens to run. That callback is dispatched
+ * asynchronously, though, and for an edge restored from a loaded graph rather than freshly drawn
+ * isn't reliably caught up by the time this node can be triggered — so {@code process()} also
+ * resolves {@code Bot} the normal pull way (safe now that {@code DiscordBotNode#connectBot} is
+ * idempotent) and, if it disagrees with the captured field, (re)subscribes right there before
+ * doing anything else. Belt and suspenders: the eager path is the fast one, the pull is the one
+ * that can't be stale.
  * <p>
  * A click's message has its buttons disabled so they can't be pressed again — handled in
  * {@link DiscordBot}'s button-interaction listener. That listener also decides, per button id,
@@ -92,6 +96,14 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
 
     @Override
     public void process(ProcessContext ctx) {
+        // Self-heal against onInputEdgeAdded's callback not having caught up yet (see the class
+        // doc): resolve the wired Bot the normal pull way too, and if it's not what we've got
+        // subscribed against, (re)subscribe before doing anything else. Harmless when they
+        // already agree — subscribeTo() is idempotent.
+        DiscordBot wiredBot = botInput.getValue();
+        if (wiredBot != bot) {
+            subscribeTo(wiredBot);
+        }
         String text = message.getValue();
         String channelId = channel.getValue();
         if (bot == null) {
