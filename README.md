@@ -7,7 +7,7 @@ they just share a build and a release.
 | Library | Nodes | Bundles |
 | --- | --- | --- |
 | `housegraph-squirrel` | Squirrel Alarm (Arduino LED-matrix sign) | nothing |
-| `housegraph-discord` | Discord Bot, Command, Slash Command, Reply, Send Message, Send Buttons, Button Click | JDA |
+| `housegraph-discord` | Discord Bot, Command, Slash Command, Reply, Send Message, Send Buttons | JDA |
 | `housegraph-reolink` | Discover Cameras, Camera Motion Status, Camera Snapshot | nothing |
 | `housegraph-web` | Web Server, Node Server, Web Hook, Web Hook Request, Web Hook Reply | jmdns |
 | `housegraph-ml` | Animal Classifier | Deep Java Library (PyTorch) |
