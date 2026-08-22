@@ -40,7 +40,9 @@ import java.util.Map;
  * <p>
  * Wire a Discord Bot node's {@code Bot} output into this node's {@code Bot} input;
  * {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} (re)subscribe against whatever
- * {@link DiscordBot} is currently on the other end. Changing the options
+ * {@link DiscordBot} is currently on the other end, resolved through
+ * {@link DiscordBotNode#botFrom(Edge)} rather than from the wired output's value, which on a
+ * graph load is null (see there). Changing the options
  * {@link #rebuildPorts() rebuilds this node's ports} (edges to surviving options reconnect
  * by name). The command is <em>declared</em> into {@link SlashCommandRegistry} against the
  * wired bot instance and registered when that bot connects — so wire the bot and set up
@@ -123,7 +125,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
     @Override
     protected void onInputEdgeAdded(Edge edge) {
         if (edge.getTargetVariable() == botInput) {
-            subscribeTo((DiscordBot) edge.getSourceVariable().getValue());
+            subscribeTo(DiscordBotNode.botFrom(edge));
         }
     }
 

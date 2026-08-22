@@ -3,6 +3,7 @@ package io.github.jaymcole.housegraph.plugins.discord.nodes;
 import io.github.jaymcole.housegraph.annotations.Display;
 import io.github.jaymcole.housegraph.annotations.Node;
 import io.github.jaymcole.housegraph.graph.BaseNode;
+import io.github.jaymcole.housegraph.graph.Edge;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
@@ -39,6 +40,11 @@ import java.util.Map;
  * resolves the token and guild id and logs in; {@code Disconnect} tears the gateway connection
  * down. The inline Connect/Disconnect buttons are a convenience, not a separate code path —
  * either reaches the same {@link #process}.
+ * <p>
+ * The {@code Bot} output is seeded at construction and re-asserted at the top of {@link #process},
+ * because it is {@link NodeVariable#transientValue() transient}: it persists as null, and a load
+ * applies that null back onto the variable, wiping the seeding. {@link #botFrom(Edge)} covers the
+ * window before the first {@code process()}, when a loaded graph's edges are wired up.
  * <p>
  * Liveness is otherwise user-driven, independent of graph flow; the actual gateway login runs
  * off the UI thread so the app stays responsive. The connection is torn down on
@@ -88,11 +94,43 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
      */
     @Override
     public void process(ProcessContext ctx) {
+        // Re-assert the handle before anything else: a graph load writes the saved null over this
+        // output (it's transient, so it persists as null and the loader applies that null back onto
+        // the variable), leaving the constructor's seeding wiped and every downstream pull reading
+        // null forever. See botFrom(Edge) for the edge-time half of the same problem.
+        botOutput.setValue(bot);
         if (ctx.wasTriggeredVia(disconnectIn)) {
             bot.disconnect();
             return;
         }
         connectBot();
+    }
+
+    /**
+     * The {@link DiscordBot} on the source side of a data edge wired into another node's
+     * {@code Bot} input — for the nodes that must capture it the moment the wire appears
+     * (Command, Slash Command, Send Buttons) rather than pull it during {@code process()}.
+     * <p>
+     * Reads the source output's value, and falls back to the source node's own handle when that
+     * value is null. That fallback is what makes a <em>loaded</em> graph work: {@code Bot} is a
+     * transient output, so it is saved as null and the loader applies that null back onto the
+     * variable, wiping what the constructor seeded — and edges are restored (firing the consumers'
+     * {@code onInputEdgeAdded}) before anything re-seeds it, so the eager capture would otherwise
+     * read null and the node would never subscribe. A {@link DiscordBotNode} always has its handle,
+     * from construction, whatever its output variable currently holds.
+     *
+     * @param edge a data edge whose target is some node's {@code Bot} input
+     * @return the bot on the other end, or null if the source carries none
+     */
+    static DiscordBot botFrom(Edge edge) {
+        Object value = edge.getSourceVariable().getValue();
+        if (value instanceof DiscordBot wired) {
+            return wired;
+        }
+        if (edge.getSourceNode() instanceof DiscordBotNode source) {
+            return source.bot;
+        }
+        return null;
     }
 
     private void connectBot() {

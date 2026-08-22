@@ -16,6 +16,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -58,6 +60,45 @@ class DiscordBotNodeTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void processingReAssertsTheBotOutputALoadWiped() {
+        // Bot is transient, so it saves as null and the loader applies that null back onto the
+        // variable, wiping what the constructor seeded — after which every downstream pull read
+        // null for the life of the node. Re-asserting it happens before the Connect half, so it
+        // holds even for this token-less node whose Connect then fails.
+        DiscordBotNode node = new DiscordBotNode();
+        NodeVariable botOutput = outputNamed(node, "Bot");
+        DiscordBot handle = (DiscordBot) botOutput.getValue();
+        botOutput.setValue(null);
+
+        assertThrows(IllegalStateException.class, () -> node.process(ProcessContext.uncancelled()),
+                "no token is wired, so connecting still fails — what happens before it is the point");
+
+        assertSame(handle, botOutput.getValue(),
+                "a pull of Bot must see this node's handle, not the null a load left behind");
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void theBotOfAnEdgeResolvesEvenWhenALoadWipedTheOutputValue() {
+        // The edge-time half: consumers that capture Bot when the wire appears (Command, Slash
+        // Command, Send Buttons) are wired up during a load, before anything re-seeds the output.
+        NodeGraph graph = new NodeGraph();
+        DiscordBotNode node = new DiscordBotNode();
+        BotSink sink = new BotSink();
+        NodeVariable botOutput = outputNamed(node, "Bot");
+        DiscordBot handle = (DiscordBot) botOutput.getValue();
+        botOutput.setValue(null);
+        graph.addNode(node);
+        graph.addNode(sink);
+        Edge edge = new Edge(node, botOutput, sink, sink.in);
+        graph.registerEdge(edge);
+
+        assertSame(handle, DiscordBotNode.botFrom(edge),
+                "the node's own handle is the fallback when its output variable has been wiped");
+    }
+
+    @Test
     void declaresItsDataInputsInDisplayOrder() {
         DiscordBotNode node = new DiscordBotNode();
 
@@ -71,6 +112,31 @@ class DiscordBotNodeTest {
 
         assertEquals(List.of("Connect", "Disconnect"),
                 node.getFlowInputs().stream().map(p -> p.name).toList());
+    }
+
+    private static NodeVariable<?> outputNamed(BaseNode node, String name) {
+        return node.getOutputs().stream()
+                .filter(v -> v.name.equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No output named \"" + name + "\""));
+    }
+
+    /** A minimal data node with a Bot input — stands in for any node wired to the bot. */
+    private static final class BotSink extends BaseNode {
+        private final NodeVariable<DiscordBot> in = new NodeVariable<>("Bot", DiscordBot.class).transientValue();
+
+        @Override
+        public void process(ProcessContext ctx) {
+        }
+
+        @Override
+        public void configureInputs() {
+            addInput(in);
+        }
+
+        @Override
+        public void configureOutputs() {
+        }
     }
 
     /** A minimal data node that outputs a fixed string — stands in for a Secret Loader node. */

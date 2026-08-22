@@ -49,13 +49,13 @@ import java.util.Map;
  * <p>
  * {@code Bot} is captured via {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} into a plain
  * field, needed regardless of process() to (re)subscribe the click listener the moment the wire
- * changes rather than only when this node happens to run. That callback is dispatched
- * asynchronously, though, and for an edge restored from a loaded graph rather than freshly drawn
- * isn't reliably caught up by the time this node can be triggered — so {@code process()} also
- * resolves {@code Bot} the normal pull way (safe now that {@code DiscordBotNode#connectBot} is
- * idempotent) and, if it disagrees with the captured field, (re)subscribes right there before
- * doing anything else. Belt and suspenders: the eager path is the fast one, the pull is the one
- * that can't be stale.
+ * changes rather than only when this node happens to run. That capture goes through
+ * {@link DiscordBotNode#botFrom(Edge)} rather than reading the wired output's value directly,
+ * because on a graph load that value is null (see there). {@code process()} also resolves
+ * {@code Bot} the normal pull way (safe now that {@code DiscordBotNode#connectBot} is idempotent)
+ * and, if it disagrees with the captured field, (re)subscribes right there before doing anything
+ * else. Belt and suspenders: the eager path is the one a click needs, the pull is the one that
+ * can't be stale.
  * <p>
  * A click's message has its buttons disabled so they can't be pressed again — handled in
  * {@link DiscordBot}'s button-interaction listener. That listener also decides, per button id,
@@ -90,10 +90,6 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     private DiscordBot declaredBot;
     private List<String> declaredLabels = new ArrayList<>();
 
-    public DiscordSendButtonsNode() {
-        log.info("Discord Send Buttons [{}] constructed", System.identityHashCode(this));
-    }
-
     @Override
     public void process(ProcessContext ctx) {
         // Self-heal against onInputEdgeAdded's callback not having caught up yet (see the class
@@ -107,8 +103,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         String text = message.getValue();
         String channelId = channel.getValue();
         if (bot == null) {
-            log.warn("Discord Send Buttons [{}] did nothing: no Bot wired in (botInput.getValue()={})",
-                    System.identityHashCode(this), botInput.getValue());
+            log.warn("Discord Send Buttons did nothing: no Bot wired in");
             activateNone(); // nothing was sent, so no branch — including a button's — should fire
             return;
         }
@@ -176,7 +171,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     @Override
     protected void onInputEdgeAdded(Edge edge) {
         if (edge.getTargetVariable() == botInput) {
-            subscribeTo((DiscordBot) edge.getSourceVariable().getValue());
+            subscribeTo(DiscordBotNode.botFrom(edge));
         }
     }
 
@@ -224,8 +219,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         }
         bot = newBot;
         botInput.setValue(newBot);
-        log.info("Discord Send Buttons [{}] {} Bot from a wired edge (bot={})",
-                System.identityHashCode(this), newBot != null ? "captured" : "cleared", newBot);
+        log.debug("Discord Send Buttons {} its Bot", newBot != null ? "captured" : "cleared");
         if (bot != null) {
             subscription = bot.addButtonListener(this::onClick);
         }

@@ -55,6 +55,13 @@ class DiscordCommandNodeTest {
                 .orElseThrow(() -> new AssertionError("No input named \"" + name + "\""));
     }
 
+    private static NodeVariable<?> outputNamed(BaseNode node, String name) {
+        return node.getOutputs().stream()
+                .filter(v -> v.name.equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No output named \"" + name + "\""));
+    }
+
     @Test
     void wiringABotEdgeCapturesItOnTheBotInput() {
         NodeGraph graph = new NodeGraph();
@@ -84,6 +91,29 @@ class DiscordCommandNodeTest {
 
         assertNull(inputNamed(command, "Bot").getValue(),
                 "unwiring the Bot edge should drop the subscription and clear the captured bot");
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void wiringARealBotNodeWhoseOutputALoadWipedStillCapturesItsBot() {
+        // The graph-load regression: Bot is a transient output, so it saves as null and the loader
+        // applies that null straight back onto the variable, wiping what the constructor seeded.
+        // Edges are restored in that state, so an eager capture that read the output's *value*
+        // captured null and this node never subscribed — for good, since nothing re-seeds the
+        // output and this node has no flow-in to pull it through either.
+        NodeGraph graph = new NodeGraph();
+        DiscordBotNode botNode = new DiscordBotNode();
+        DiscordCommandNode command = new DiscordCommandNode();
+        NodeVariable botOutput = outputNamed(botNode, "Bot");
+        DiscordBot handle = (DiscordBot) botOutput.getValue();
+        botOutput.setValue(null);
+        graph.addNode(botNode);
+        graph.addNode(command);
+
+        graph.registerEdge(new Edge(botNode, botOutput, command, inputNamed(command, "Bot")));
+
+        assertSame(handle, inputNamed(command, "Bot").getValue(),
+                "a bot node always has its handle, whatever a load left in its output variable");
     }
 
     @Test

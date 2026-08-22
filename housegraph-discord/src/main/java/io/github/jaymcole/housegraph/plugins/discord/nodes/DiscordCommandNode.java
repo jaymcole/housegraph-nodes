@@ -29,9 +29,13 @@ import java.util.Map;
  * subscription follows the wire — {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved}
  * (re)subscribe against whatever {@link DiscordBot} is currently on the other end, so
  * rewiring to a different bot takes effect immediately, with no flow-in needed to pick it
- * up. Matching is handled by {@link CommandMatcher}. Events arrive on a Discord thread;
- * firing goes through the normal background-threaded trigger path, with all outputs set
- * together for that one invocation so a burst of commands can't mix their values.
+ * up. That capture goes through {@link DiscordBotNode#botFrom(Edge)} rather than reading the
+ * wired output's value directly, because on a graph load that value is null (see there) — and
+ * with no flow-in, this node has no second chance to pick the bot up later.
+ * <p>
+ * Matching is handled by {@link CommandMatcher}. Events arrive on a Discord thread; firing goes
+ * through the normal background-threaded trigger path, with all outputs set together for that one
+ * invocation so a burst of commands can't mix their values.
  */
 @Display.Name("Discord Command")
 @Node.Type("discord.DiscordCommandNode")
@@ -88,7 +92,7 @@ public class DiscordCommandNode extends BaseNode implements NodeContentProvider 
     @Override
     protected void onInputEdgeAdded(Edge edge) {
         if (edge.getTargetVariable() == botInput) {
-            subscribeTo((DiscordBot) edge.getSourceVariable().getValue());
+            subscribeTo(DiscordBotNode.botFrom(edge));
         }
     }
 
