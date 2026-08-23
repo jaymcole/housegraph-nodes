@@ -1,0 +1,12 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-collections'
+    libraryName = 'Collections'
+    description = 'Building, inspecting, filtering and transforming lists.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.collections.nodes']
+}
+
+// No dependencies — plain java.util on top of the API.

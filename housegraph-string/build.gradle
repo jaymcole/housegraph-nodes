@@ -1,0 +1,12 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-string'
+    libraryName = 'Text'
+    description = 'Building, reshaping, matching and parsing text.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.string.nodes']
+}
+
+// No dependencies — java.lang.String and java.util.regex on top of the API.
