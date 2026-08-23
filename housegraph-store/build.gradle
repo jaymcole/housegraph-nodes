@@ -1,0 +1,13 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-store'
+    libraryName = 'Storage'
+    description = 'Remembering a value between runs, in a JSON data store.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.store.nodes']
+}
+
+// No dependencies — org.json comes from housegraph-api (api, compileOnly here), and the store
+// itself is the host's, wired in as a value rather than opened by this library.

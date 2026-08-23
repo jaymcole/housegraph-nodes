@@ -17,6 +17,7 @@ they just share a build and a release.
 | `housegraph-schedule` | Daily Trigger | nothing |
 | `housegraph-collections` | Split Text, Build List, Number Range, List Count, Get Item, List Contains, Index Of, Join List, Slice List, Reverse List, Sort List, Distinct, Concat Lists, Append Item, Remove Item, Flatten, Shuffle, Random Item, Filter by Text, Filter by Pattern, Filter by Number, Format Each, List Statistics, Collect Items | nothing |
 | `housegraph-string` | Format Text, Join Text, Change Case, Trim Text, Replace Text, Substring, Truncate Text, Compare Text, Text Length, Regex Match, Regex Find All, Regex Replace, Parse Number, Parse Boolean | nothing |
+| `housegraph-store` | Stored Value | nothing |
 
 ## Installing
 
