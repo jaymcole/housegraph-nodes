@@ -19,5 +19,10 @@
  * a second control node of the same kind, so filtering here is done by parameter (see
  * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.FilterByTextNode} and its
  * siblings) rather than by callback.
+ * <p>
+ * The sibling {@code nodes.maps} and {@code nodes.sets} packages hold this library's map and set
+ * nodes, kept in their own subfolders rather than flattened in here as the library's node count
+ * has grown — each backs onto its own sibling utility class in {@code collections} the same way
+ * this package backs onto {@link io.github.jaymcole.housegraph.plugins.collections.Lists}.
  */
 package io.github.jaymcole.housegraph.plugins.collections.nodes;
