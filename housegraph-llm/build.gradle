@@ -1,0 +1,14 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-llm'
+    libraryName = 'Local LLM'
+    description = 'Prompts a language model running on this machine (Ollama, or any OpenAI-compatible server) and returns its reply as text.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.llm.nodes']
+}
+
+// No dependencies. The server is spoken to over plain HTTP with java.net.http.HttpClient, and
+// org.json — the only JSON this needs — comes from housegraph-api (api, compileOnly here). Nothing
+// is bundled, so there is nothing to relocate.
