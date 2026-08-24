@@ -5,7 +5,13 @@ plugins {
 nodeLibrary {
     id = 'housegraph-collections'
     libraryName = 'Collections'
-    description = 'Building, inspecting, filtering and transforming lists.'
+    description = 'Lists, maps and sets - building, inspecting, filtering and transforming them.'
+
+    // ONE root package, not the three subpackages under it. NodeRegistry scans a root recursively
+    // and derives each node's Add-Node menu category from its path *below that root*, so this
+    // gives collections.lists / collections.maps / collections.sets. Naming the three subpackages
+    // here instead would make every node's path relative to its own root - an empty path - and
+    // collapse all three back into one flat "collections" menu.
     nodePackages = ['io.github.jaymcole.housegraph.plugins.collections.nodes']
 }
 

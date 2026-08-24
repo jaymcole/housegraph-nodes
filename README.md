@@ -15,7 +15,7 @@ they just share a build and a release.
 | `housegraph-experimental` | Lightbulb | nothing |
 | `housegraph-filesystem` | Create Folder | nothing |
 | `housegraph-schedule` | Daily Trigger | nothing |
-| `housegraph-collections` | Split Text, Build List, Number Range, List Count, Get Item, List Contains, Index Of, Join List, Slice List, Reverse List, Sort List, Distinct, Concat Lists, Append Item, Remove Item, Flatten, Shuffle, Random Item, Filter by Text, Filter by Pattern, Filter by Number, Format Each, List Statistics, Collect Items | nothing |
+| `housegraph-collections` | **lists:** Split Text, Build List, Number Range, List Count, Get Item, List Contains, Index Of, Join List, Slice List, Reverse List, Sort List, Distinct, Concat Lists, Append Item, Remove Item, Flatten, Shuffle, Random Item, Filter by Text, Filter by Pattern, Filter by Number, Format Each, List Statistics, Collect Items<br>**maps:** Build Map, Map Get, Map Put, Map Remove, Map Entries, Map from Lists, Merge Maps, Join Map, Tally, Collect Entries<br>**sets:** To Set, Set to List, Set Contains, Set Add, Set Remove, Set Union, Set Intersection, Set Difference | nothing |
 | `housegraph-string` | Format Text, Join Text, Change Case, Trim Text, Replace Text, Substring, Truncate Text, Compare Text, Text Length, Regex Match, Regex Find All, Regex Replace, Parse Number, Parse Boolean | nothing |
 | `housegraph-store` | Stored Value | nothing |
 
@@ -51,6 +51,14 @@ housegraph-yourthing/
   build.gradle               ~10 lines: apply the convention plugin, declare identity
   src/main/java/io/github/jaymcole/housegraph/plugins/yourthing/nodes/
 ```
+
+**Subpackages under `nodes/` become submenus.** HouseGraph scans the declared package recursively
+and derives each node's Add-Node category from its path *below* that package, nested under the
+library's id — so `…/yourthing/nodes/widgets/FooNode.java` lands under **yourthing → widgets**.
+Once a library has more than a screenful of nodes, that's how to organise it; `housegraph-collections`
+does it with `lists`, `maps` and `sets`. Keep declaring the one root package in `nodePackages`:
+naming the subpackages individually makes each of them its own scan root, and the categories
+collapse back to flat.
 
 ```groovy
 plugins { id 'housegraph-node-library' }
