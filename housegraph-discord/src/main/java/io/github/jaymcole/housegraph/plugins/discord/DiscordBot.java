@@ -6,6 +6,7 @@ import io.github.jaymcole.housegraph.resource.Subscription;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
@@ -151,6 +152,12 @@ public final class DiscordBot {
      * optional text argument, and remembers their ephemeral flags for deferring. Replaces
      * the previous set. Registers to the configured {@link #setGuildId guild} if set
      * (instant), otherwise globally (~1 hour to propagate). A no-op if not connected.
+     * <p>
+     * A spec with {@link SlashCommandSpec#hiddenByDefault()} set registers with its default
+     * member permissions disabled, hiding it from everyone's command picker. Discord only
+     * lets a bot control that all-or-nothing default; granting the command back to specific
+     * roles is a manual step a server admin does per-guild, in Server Settings ->
+     * Integrations — there is no bot-token API left for setting per-role command privileges.
      */
     public void syncCommands(Collection<SlashCommandSpec> specs) {
         JDA current;
@@ -170,6 +177,12 @@ public final class DiscordBot {
                 SlashCommandData command = Commands.slash(name, spec.description());
                 for (CommandOption option : spec.options()) {
                     command.addOption(toJdaType(option.type()), option.name().toLowerCase(Locale.ROOT), option.name(), false);
+                }
+                if (spec.hiddenByDefault()) {
+                    // Hides the command from everyone's picker at registration time. Discord no
+                    // longer lets a bot grant it back to specific roles itself — that's a manual
+                    // step a server admin does per-guild in Server Settings -> Integrations.
+                    command.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
                 }
                 data.add(command);
                 ephemeralByCommand.put(name, spec.ephemeral());

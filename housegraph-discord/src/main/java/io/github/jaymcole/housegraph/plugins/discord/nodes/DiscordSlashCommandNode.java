@@ -46,8 +46,15 @@ import java.util.Map;
  * {@link #rebuildPorts() rebuilds this node's ports} (edges to surviving options reconnect
  * by name). The command is <em>declared</em> into {@link SlashCommandRegistry} against the
  * wired bot instance and registered when that bot connects — so wire the bot and set up
- * commands, then connect; a change afterward (options, ephemeral, name) needs a reconnect.
- * Option and command names are lowercased to satisfy Discord.
+ * commands, then connect; a change afterward (options, ephemeral, hidden, name) needs a
+ * reconnect. Option and command names are lowercased to satisfy Discord.
+ * <p>
+ * "Hide from @everyone by default" registers the command with its default member
+ * permissions disabled, so nobody sees it in their command picker until a server admin
+ * grants it back to specific roles — a manual, per-server step in Discord's own Server
+ * Settings → Integrations page. There's no bot-token API left for setting per-role
+ * command visibility (see {@link DiscordBot#syncCommands}), so this node can't do that
+ * part for you.
  */
 @Display.Name("Discord Slash Command")
 @Node.Type("discord.DiscordSlashCommandNode")
@@ -67,6 +74,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
     private DiscordBot bot;
     private String command = "command";
     private boolean ephemeral;
+    private boolean hiddenByDefault;
     private DiscordBot declaredBot;
     private String declaredCommand;
     private Subscription subscription;
@@ -107,6 +115,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         Map<String, String> state = new HashMap<>();
         state.put("command", command);
         state.put("ephemeral", Boolean.toString(ephemeral));
+        state.put("hiddenByDefault", Boolean.toString(hiddenByDefault));
         state.put("options", formatOptions(options));
         return state;
     }
@@ -118,6 +127,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             command = saved;
         }
         ephemeral = Boolean.parseBoolean(state.get("ephemeral"));
+        hiddenByDefault = Boolean.parseBoolean(state.get("hiddenByDefault"));
         options.clear();
         options.addAll(parseOptions(state.get("options")));
     }
@@ -164,7 +174,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             declaredBot = bot;
             declaredCommand = name;
             SlashCommandRegistry.shared().declare(declaredBot,
-                    new SlashCommandSpec(name, DESCRIPTION, ephemeral, new ArrayList<>(options)));
+                    new SlashCommandSpec(name, DESCRIPTION, ephemeral, hiddenByDefault, new ArrayList<>(options)));
         } else {
             declaredBot = null;
             declaredCommand = null;
@@ -215,6 +225,17 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             redeclare();
         });
 
+        CheckBox hiddenBox = new CheckBox("Hide from @everyone by default");
+        hiddenBox.setStyle("-fx-text-fill: #dddddd; -fx-font-size: 11px;");
+        hiddenBox.setSelected(hiddenByDefault);
+        hiddenBox.selectedProperty().addListener((obs, was, now) -> {
+            hiddenByDefault = now;
+            redeclare();
+        });
+        Label hiddenHint = new Label("After reconnecting, grant it to roles per-server in Discord's\nServer Settings → Integrations — that part can't be automated.");
+        hiddenHint.setWrapText(true);
+        hiddenHint.setStyle("-fx-text-fill: #888888; -fx-font-size: 9px;");
+
         // Options are edited as rows and applied all at once, so the node's ports rebuild
         // just once (on Apply) rather than jarringly on every keystroke.
         VBox optionRows = new VBox(3);
@@ -232,7 +253,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         Label optionsLabel = new Label("Options");
         optionsLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
-        return new VBox(4, commandField, ephemeralBox,
+        return new VBox(4, commandField, ephemeralBox, hiddenBox, hiddenHint,
                 optionsLabel, optionRows, new HBox(6, addButton, applyButton));
     }
 
