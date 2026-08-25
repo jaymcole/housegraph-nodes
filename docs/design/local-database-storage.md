@@ -64,8 +64,10 @@ Recommendation: a new library, `housegraph-database`, bundling
 
 **Build consequences** (against `docs/shared/node-library-rules.md`):
 
-- `sqlite-jdbc` has **no `slf4j-api` dependency**, so rule 6 needs no `exclude` here. Verify with
-  `./gradlew :housegraph-database:dependencies` anyway; that is how the other three were caught.
+- `sqlite-jdbc` **does** depend on `slf4j-api` (1.7.36, compile scope), so rule 6 applies and the
+  dependency needs an `exclude` — checked with `./gradlew :housegraph-database:dependencies`, which
+  is how the other three were caught, and worth doing rather than assuming: the first draft of this
+  note asserted the opposite from memory.
 - It registers a JDBC driver by `ServiceLoader`, so `mergeServiceFiles()` — already unconditional
   in the convention plugin — is load-bearing (rule 3 names JDBC drivers for this reason).
 - **Do not relocate it, deliberately, and write down why.** The jar loads a native library by
@@ -242,10 +244,13 @@ Small enough to prove the risky parts, useful on its own:
    count.
 5. `SQL Query` / `SQL Statement`, parameterised.
 
-**Prove the build before writing node four.** Build the shaded jar, install it into a real
-HouseGraph on a clean machine, and open a database. Bundled-native loading through a shaded jar is
-the one thing here that fails at runtime, in the user's install, with a message about a missing
-library — exactly the silent-failure class the rules document exists to catch.
+Steps 1-2 are built. **Prove the build before writing node four** — done for what exists: the
+shaded jar is loaded in a child class loader over a parent holding the API, exactly as the host
+loads a library, and driven by reflection to open a database, insert and read back
+(`scripts/` has no home for this yet; it currently lives outside the repository, and giving it one
+is the obvious next chore). That check covers the two failures that cannot happen in a unit test:
+the bundled SQLite native not loading from inside the shaded jar, and a node resolving its own copy
+of `BaseNode` instead of the host's — the second of which makes a node silently never appear.
 
 Tag the PR **`#minor`** (a new library, backwards compatible).
 
