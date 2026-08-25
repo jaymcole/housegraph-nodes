@@ -39,6 +39,12 @@ import java.util.Map;
  * <b>Open folder</b> shows it; the {@code -wal} and {@code -shm} files next to the database are
  * SQLite's working files and are not to be deleted while HouseGraph is running.
  * <p>
+ * <b>Columns\u2026</b> opens this database's schema: what tables it has, what columns each has, and how
+ * many rows actually have a value in each of them. It is also the only place a column can be renamed
+ * or dropped — see {@link ColumnEditor} for why those live behind a click rather than in a node, and
+ * what is copied before either happens. Adding a column needs nothing: it happens by itself the
+ * first time a row carries a new key.
+ * <p>
  * <b>It is a real SQLite file.</b> Anything that opens SQLite can read it, back it up or repair it,
  * and a column added from outside is picked up here without ceremony. That was most of the reason
  * for choosing SQLite: the recovery story for someone's six months of sensor readings should not
@@ -112,11 +118,15 @@ public class DatabaseNode extends BaseNode implements NodeContentProvider {
         openFolderButton.setMaxWidth(Double.MAX_VALUE);
         openFolderButton.setOnAction(e -> openStorageFolder());
 
+        Button columnsButton = new Button("Columns\u2026");
+        columnsButton.setMaxWidth(Double.MAX_VALUE);
+        columnsButton.setOnAction(e -> new ColumnEditor(databaseFor(name), name, this::refreshStatus).show());
+
         statusLabel = new Label();
         statusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
         refreshStatus();
 
-        return new VBox(4, nameField, openFolderButton, statusLabel);
+        return new VBox(4, nameField, openFolderButton, columnsButton, statusLabel);
     }
 
     private void commitName() {

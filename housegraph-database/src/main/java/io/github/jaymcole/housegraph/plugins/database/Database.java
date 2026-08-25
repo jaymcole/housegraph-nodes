@@ -12,6 +12,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -67,6 +70,24 @@ public final class Database {
 
     /** Epoch milliseconds, filled in on insert when the row does not supply its own. */
     public static final String CREATED_AT_COLUMN = "created_at";
+
+    /** Prefix of this library's own bookkeeping tables, hidden from {@link #tables()}. */
+    private static final String META_TABLE_PREFIX = "_housegraph_";
+
+    /** The table recording what schema changes have been applied, and when. */
+    private static final String MIGRATIONS_TABLE = META_TABLE_PREFIX + "migrations";
+
+    /**
+     * This library's on-disk layout version, stamped into {@code PRAGMA user_version}. It lives in
+     * the file rather than in the graph save on purpose: the file outlives any node, is opened by
+     * more than one graph, and can be edited from outside — so a version held in a save would
+     * disagree with reality the first time any of that happened. Nothing reads it yet; it is here so
+     * that a future layout change has somewhere to look before it touches anyone's data.
+     */
+    private static final int LAYOUT_VERSION = 1;
+
+    /** Columns this library relies on, which it therefore will not let the editor rename or drop. */
+    private static final Set<String> STRUCTURAL_COLUMNS = Set.of(ID_COLUMN, CREATED_AT_COLUMN);
 
     /** How long to wait for another connection's write lock before failing (milliseconds). */
     private static final int BUSY_TIMEOUT_MILLIS = 5_000;
@@ -277,7 +298,8 @@ public final class Database {
             try (Statement statement = connection.createStatement();
                  ResultSet results = statement.executeQuery(
                          "SELECT name FROM sqlite_master WHERE type = 'table'"
-                                 + " AND name NOT LIKE 'sqlite_%' ORDER BY name")) {
+                                 + " AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '"
+                                 + META_TABLE_PREFIX + "%' ORDER BY name")) {
                 List<String> tables = new ArrayList<>();
                 while (results.next()) {
                     tables.add(results.getString(1));
@@ -313,6 +335,206 @@ public final class Database {
             } catch (SQLException e) {
                 throw failure("check whether \"" + table + "\" exists", e);
             }
+        }
+    }
+
+    // --- Schema changes -----------------------------------------------------------------------
+    //
+    // Everything above this line either adds a column or leaves the schema alone. Everything below
+    // it destroys something, and is therefore meant to be reached from a person clicking in the
+    // Database node's column editor rather than from anything a graph can run: a migration that
+    // executed as a side effect of process() would re-apply itself on every tick, so one typo'd
+    // column name would be dropped again and again, on a timer, with nobody watching.
+    //
+    // Each one copies the file first. See #backup.
+
+    /**
+     * How many rows have a value in this column — the blast radius of dropping it, and the number
+     * the editor puts in front of someone before they do. Empty text counts as no value, for the
+     * same reason {@link Match#IS_EMPTY} treats it as empty.
+     *
+     * @param table  the table
+     * @param column the column
+     * @return how many rows would lose something
+     */
+    public int valuesIn(String table, String column) {
+        synchronized (this) {
+            Connection connection = connection();
+            if (!hasTable(table) || !readColumns(connection, table).contains(column)) {
+                return 0;
+            }
+            String sql = "SELECT COUNT(*) FROM " + Sql.identifier(table)
+                    + " WHERE " + Sql.identifier(column) + " IS NOT NULL AND " + Sql.identifier(column) + " != ''";
+            try (Statement statement = connection.createStatement();
+                 ResultSet results = statement.executeQuery(sql)) {
+                return results.next() ? results.getInt(1) : 0;
+            } catch (SQLException e) {
+                throw failure("count the values in \"" + column + "\"", e);
+            }
+        }
+    }
+
+    /**
+     * Renames a column, keeping every value in it.
+     *
+     * @param table the table
+     * @param from  the column's current name
+     * @param to    its new name
+     * @return where the pre-change copy of the database was written
+     * @throws DatabaseException if the column is structural, the new name is taken, or the rename fails
+     */
+    public Path renameColumn(String table, String from, String to) {
+        String target = to == null ? "" : to.trim();
+        synchronized (this) {
+            requireChangeable(table, from);
+            if (target.isBlank()) {
+                throw new DatabaseException("A column needs a name to be renamed to");
+            }
+            if (readColumns(connection(), table).contains(target)) {
+                throw new DatabaseException("\"" + table + "\" already has a column called \"" + target + "\"");
+            }
+            Path copy = backup();
+            alter(table, "RENAME COLUMN " + Sql.identifier(from) + " TO " + Sql.identifier(target),
+                    "rename " + from + " to " + target + " in " + table);
+            return copy;
+        }
+    }
+
+    /**
+     * Drops a column, and every value in it. Ask {@link #valuesIn} first and show the answer to
+     * whoever is about to do this.
+     *
+     * @param table  the table
+     * @param column the column to drop
+     * @return where the pre-change copy of the database was written
+     * @throws DatabaseException if the column is structural, or SQLite refuses the drop
+     */
+    public Path dropColumn(String table, String column) {
+        synchronized (this) {
+            requireChangeable(table, column);
+            Path copy = backup();
+            // SQLite refuses to drop a column that a PRIMARY KEY, a UNIQUE constraint, an index, a
+            // view or a trigger depends on, and says which. Nothing this library creates is in that
+            // position, but a table someone made in a database browser can be, so the failure is
+            // reported rather than worked around with a table rebuild - a rebuild that guessed at
+            // constraints it did not create is a worse outcome than a clear refusal.
+            alter(table, "DROP COLUMN " + Sql.identifier(column), "drop " + column + " from " + table);
+            return copy;
+        }
+    }
+
+    /**
+     * A complete, consistent copy of the database, written beside it as
+     * {@code <name>.backup-<timestamp>.db}.
+     * <p>
+     * {@code VACUUM INTO} rather than a file copy, because in WAL mode the {@code .db} file on its
+     * own is not the current database — the most recent commits are still in the {@code -wal}, and
+     * copying the one file without the other would produce a backup silently missing them. This is
+     * also why the copy happens through SQLite rather than through {@link Files#copy}.
+     *
+     * @return the path written
+     * @throws DatabaseException if the copy can't be made
+     */
+    public Path backup() {
+        synchronized (this) {
+            Connection connection = connection();
+            String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault())
+                    .format(Instant.now());
+            String name = file.getFileName().toString().replaceFirst("\\.db$", "");
+            Path copy = file.resolveSibling(name + ".backup-" + stamp + ".db");
+            for (int attempt = 2; Files.exists(copy); attempt++) {
+                copy = file.resolveSibling(name + ".backup-" + stamp + "-" + attempt + ".db");
+            }
+            // VACUUM cannot run inside a transaction, so this deliberately does not go through
+            // inTransaction.
+            try (PreparedStatement statement = connection.prepareStatement("VACUUM INTO ?")) {
+                statement.setString(1, copy.toAbsolutePath().toString());
+                statement.executeUpdate();
+            } catch (SQLException e) {
+                throw failure("copy the database before changing its schema", e);
+            }
+            return copy;
+        }
+    }
+
+    /**
+     * What has been done to this database's schema, newest first, as lines for the editor to show.
+     * Kept in the file next to the data it describes, for the reason {@link #LAYOUT_VERSION} is.
+     *
+     * @return the applied changes, newest first
+     */
+    public List<String> migrations() {
+        synchronized (this) {
+            Connection connection = connection();
+            if (!hasTable(MIGRATIONS_TABLE)) {
+                return List.of();
+            }
+            try (Statement statement = connection.createStatement();
+                 ResultSet results = statement.executeQuery("SELECT applied_at, change FROM "
+                         + Sql.identifier(MIGRATIONS_TABLE) + " ORDER BY applied_at DESC, id DESC")) {
+                List<String> lines = new ArrayList<>();
+                DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                        .withZone(ZoneId.systemDefault());
+                while (results.next()) {
+                    lines.add(format.format(Instant.ofEpochMilli(results.getLong(1))) + "  " + results.getString(2));
+                }
+                return List.copyOf(lines);
+            } catch (SQLException e) {
+                throw failure("read the schema history", e);
+            }
+        }
+    }
+
+    /** Runs one ALTER TABLE and records it, as a single transaction. */
+    private void alter(String table, String change, String description) {
+        Connection connection = connection();
+        inTransaction(connection, () -> {
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate("ALTER TABLE " + Sql.identifier(table) + " " + change);
+            }
+            record(connection, description);
+            // The cache describes a schema that no longer exists.
+            knownColumns.remove(table);
+            return null;
+        }, description);
+    }
+
+    /** Appends to the migration log, creating it (and stamping the layout version) on first use. */
+    private void record(Connection connection, String description) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS " + Sql.identifier(MIGRATIONS_TABLE) + " ("
+                    + Sql.identifier(ID_COLUMN) + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    + "applied_at INTEGER, change TEXT)");
+            statement.executeUpdate("PRAGMA user_version = " + LAYOUT_VERSION);
+        }
+        try (PreparedStatement statement = connection.prepareStatement("INSERT INTO "
+                + Sql.identifier(MIGRATIONS_TABLE) + " (applied_at, change) VALUES (?, ?)")) {
+            statement.setLong(1, System.currentTimeMillis());
+            statement.setString(2, description);
+            statement.executeUpdate();
+        }
+    }
+
+    /**
+     * Refuses a change to a column this library depends on. {@code id} is how a row is addressed and
+     * {@code created_at} is re-created by the next insert anyway, so renaming or dropping either
+     * produces a database that looks changed and behaves as though it were not — the worst of the
+     * available outcomes.
+     */
+    private void requireChangeable(String table, String column) {
+        if (!hasTable(table)) {
+            throw new DatabaseException("There is no table called \"" + table + "\" to change");
+        }
+        if (column == null || column.isBlank()) {
+            throw new DatabaseException("No column was named");
+        }
+        if (STRUCTURAL_COLUMNS.contains(column)) {
+            throw new DatabaseException("\"" + column + "\" is part of how every table here works and cannot be "
+                    + "renamed or dropped: id is how a row is addressed, and created_at would be re-created by "
+                    + "the next insert.");
+        }
+        if (!readColumns(connection(), table).contains(column)) {
+            throw new DatabaseException("\"" + table + "\" has no column called \"" + column + "\"");
         }
     }
 
