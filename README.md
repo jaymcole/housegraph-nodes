@@ -19,7 +19,7 @@ they just share a build and a release.
 | `housegraph-string` | Format Text, Join Text, Change Case, Trim Text, Replace Text, Substring, Truncate Text, Compare Text, Text Length, Regex Match, Regex Find All, Regex Replace, Parse Number, Parse Boolean | nothing |
 | `housegraph-store` | Stored Value | nothing |
 | `housegraph-llm` | Local LLM | nothing |
-| `housegraph-database` | Database, Insert Row, Find Rows | sqlite-jdbc |
+| `housegraph-database` | Database, Insert Row, Find Rows, Update Rows, Delete Rows, SQL Query, SQL Statement | sqlite-jdbc |
 
 ## Installing
 

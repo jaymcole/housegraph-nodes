@@ -338,6 +338,69 @@ public final class Database {
         }
     }
 
+    /**
+     * Runs a query written by hand and returns its rows, with {@code ?} placeholders bound from
+     * {@code parameters} in order.
+     * <p>
+     * <b>The parameters are the only way to get a value into the statement.</b> A graph's tables get
+     * filled from chat messages and webhook bodies; a library whose escape hatch invited string
+     * concatenation would make SQL injection a normal outcome rather than an exotic one. Values
+     * bound here cannot change what the statement does, whatever they contain.
+     *
+     * @param sql        one SQL statement returning rows
+     * @param parameters the values for its placeholders, in order
+     * @return the rows, read by the same rules as {@link #find}
+     * @throws DatabaseException if the query can't be run
+     */
+    public List<Map<String, Object>> query(String sql, List<Object> parameters) {
+        synchronized (this) {
+            try (PreparedStatement statement = connection().prepareStatement(requireStatement(sql))) {
+                bindAll(statement, parameters == null ? List.of() : parameters);
+                try (ResultSet results = statement.executeQuery()) {
+                    List<Map<String, Object>> rows = new ArrayList<>();
+                    while (results.next()) {
+                        rows.add(Rows.read(results));
+                    }
+                    return List.copyOf(rows);
+                }
+            } catch (SQLException e) {
+                throw failure("run that query", e);
+            }
+        }
+    }
+
+    /**
+     * Runs a statement written by hand that changes something, and returns how many rows it changed
+     * (0 for a statement that changes the schema rather than rows). Placeholders are bound as
+     * {@link #query} describes, and for the same reason.
+     *
+     * @param sql        one SQL statement
+     * @param parameters the values for its placeholders, in order
+     * @return the number of rows changed
+     * @throws DatabaseException if the statement can't be run
+     */
+    public int execute(String sql, List<Object> parameters) {
+        synchronized (this) {
+            try (PreparedStatement statement = connection().prepareStatement(requireStatement(sql))) {
+                bindAll(statement, parameters == null ? List.of() : parameters);
+                return statement.executeUpdate();
+            } catch (SQLException e) {
+                throw failure("run that statement", e);
+            } finally {
+                // A hand-written statement may have created, altered or dropped anything, so what
+                // this instance believes about the schema is no longer worth believing.
+                knownColumns.clear();
+            }
+        }
+    }
+
+    private static String requireStatement(String sql) {
+        if (sql == null || sql.isBlank()) {
+            throw new DatabaseException("There is no SQL to run");
+        }
+        return sql.trim();
+    }
+
     // --- Schema changes -----------------------------------------------------------------------
     //
     // Everything above this line either adds a column or leaves the schema alone. Everything below

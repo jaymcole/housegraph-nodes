@@ -235,16 +235,22 @@ where the cost of a silent mistake is high — and it is one checkbox, not a sch
 
 ## 7. Suggested first slice
 
-Small enough to prove the risky parts, useful on its own:
+Small enough to prove the risky parts, useful on its own — **all of it is now built**:
 
-1. `Database` node (name → file, connection, `Open folder`, row/table summary) + `Databases.forFile`.
-2. `Insert Row` with inferred columns, `Find Rows` with a growing `Where`, `Count Rows`.
-3. `Delete Rows`, `Update Rows`.
-4. The column editor on the `Database` node: rename, drop, with the backup copy and the blast-radius
-   count.
-5. `SQL Query` / `SQL Statement`, parameterised.
+1. ✅ `Database` node (name → file, connection, `Open folder`, row/table summary) + `Databases.forFile`.
+2. ✅ `Insert Row` with inferred columns, `Find Rows` with a growing `Where`. (`Count Rows` was
+   dropped as its own node: `Find Rows` reports a `Count`, and `SQL Query` covers
+   `SELECT COUNT(*)` without dragging rows into the graph.)
+3. ✅ `Delete Rows`, `Update Rows` — both refusing to run with no conditions, since SQL's reading of
+   a missing `WHERE` is the correct one and the wrong default here.
+4. ✅ The column editor on the `Database` node: rename, drop, with the copy taken first and the
+   blast-radius count shown before either.
+5. ✅ `SQL Query` / `SQL Statement`, parameterised.
 
-Steps 1-2 are built. **Prove the build before writing node four** — done for what exists: the
+What §5.4 called strict mode is **not** built, deliberately: inference has not yet been lived with
+long enough to know whether the typo'd-column problem it guards against is real in practice.
+`Insert Row`'s `Columns Added` output is the cheaper first move — it makes the drift visible without
+adding a mode. **Prove the build before writing node four** — done for what exists: the
 shaded jar is loaded in a child class loader over a parent holding the API, exactly as the host
 loads a library, and driven by reflection to open a database, insert and read back
 (`scripts/` has no home for this yet; it currently lives outside the repository, and giving it one

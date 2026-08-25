@@ -3,6 +3,8 @@ package io.github.jaymcole.housegraph.plugins.database.nodes;
 import io.github.jaymcole.housegraph.plugins.database.Criterion;
 import io.github.jaymcole.housegraph.plugins.database.Database;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -53,6 +55,19 @@ final class Inputs {
                     + "Column \"id\", Test \">\", Value 0.");
         }
         return criteria;
+    }
+
+    /**
+     * A wired Params list as the values to bind, in order. An unwired list is no parameters, which is
+     * right for a statement that has no placeholders; a statement that does have them and is given
+     * none fails in the driver, naming the count it wanted.
+     * <p>
+     * Copied with {@link ArrayList} rather than {@link List#copyOf}, which rejects nulls: a null
+     * parameter is a legitimate thing to bind ({@code WHERE done IS ?}), and refusing it here would
+     * be this library inventing a restriction SQL does not have.
+     */
+    static List<Object> parameters(List<?> wired) {
+        return wired == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(wired));
     }
 
     private static <T> T fail(String message) {
