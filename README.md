@@ -20,6 +20,7 @@ they just share a build and a release.
 | `housegraph-store` | Stored Value | nothing |
 | `housegraph-llm` | Local LLM | nothing |
 | `housegraph-database` | Database, Insert Row, Find Rows, Update Rows, Delete Rows, SQL Query, SQL Statement | sqlite-jdbc |
+| `housegraph-datetime` | Milliseconds To Date Time | nothing |
 
 ## Installing
 
