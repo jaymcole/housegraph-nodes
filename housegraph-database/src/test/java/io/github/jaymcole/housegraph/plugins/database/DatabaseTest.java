@@ -189,6 +189,70 @@ class DatabaseTest {
     }
 
     @Test
+    void updatesOnlyTheMatchingRows() {
+        database.insert("chores", row("name", "dishes", "done", "no"));
+        database.insert("chores", row("name", "bins", "done", "no"));
+
+        int changed = database.update("chores",
+                List.of(Criterion.of("name", Match.EQUALS, "dishes")), row("done", "yes"));
+
+        assertEquals(1, changed);
+        assertEquals("yes", database.find("chores",
+                List.of(Criterion.of("name", Match.EQUALS, "dishes")), null, 0).get(0).get("done"));
+        assertEquals("no", database.find("chores",
+                List.of(Criterion.of("name", Match.EQUALS, "bins")), null, 0).get(0).get("done"));
+    }
+
+    @Test
+    void addsAColumnAnUpdateSetsForTheFirstTime() {
+        database.insert("chores", row("name", "dishes"));
+
+        database.update("chores", List.of(Criterion.of("name", Match.EQUALS, "dishes")), row("who", "ada"));
+
+        assertTrue(database.columns("chores").contains("who"));
+        assertEquals("ada", database.find("chores", List.of(), null, 0).get(0).get("who"));
+    }
+
+    @Test
+    void refusesAnUpdateThatSetsNothing() {
+        database.insert("chores", row("name", "dishes"));
+
+        assertThrows(DatabaseException.class,
+                () -> database.update("chores", List.of(Criterion.of("name", Match.EQUALS, "dishes")), Map.of()));
+    }
+
+    @Test
+    void leavesAColumnAloneWhenTheNewValueIsNull() {
+        database.insert("chores", row("name", "dishes", "who", "ada"));
+        Map<String, Object> changes = row("done", "yes");
+        changes.put("who", null);
+
+        database.update("chores", List.of(Criterion.of("name", Match.EQUALS, "dishes")), changes);
+
+        Map<String, Object> stored = database.find("chores", List.of(), null, 0).get(0);
+        assertEquals("ada", stored.get("who"), "a null must not overwrite what is stored");
+        assertEquals("yes", stored.get("done"));
+    }
+
+    @Test
+    void deletesOnlyTheMatchingRows() {
+        database.insert("chores", row("name", "dishes"));
+        database.insert("chores", row("name", "bins"));
+
+        int removed = database.delete("chores", List.of(Criterion.of("name", Match.EQUALS, "dishes")));
+
+        assertEquals(1, removed);
+        assertEquals(1, database.rowCount("chores"));
+    }
+
+    @Test
+    void changesNothingInATableThatDoesNotExist() {
+        assertEquals(0, database.delete("nothing-here", List.of(Criterion.of("name", Match.EQUALS, "x"))));
+        assertEquals(0, database.update("nothing-here",
+                List.of(Criterion.of("name", Match.EQUALS, "x")), row("done", "yes")));
+    }
+
+    @Test
     void refusesAConditionThatNamesAColumnButHasNoValue() {
         DatabaseException failure = assertThrows(DatabaseException.class,
                 () -> Criterion.of("who", Match.EQUALS, null));

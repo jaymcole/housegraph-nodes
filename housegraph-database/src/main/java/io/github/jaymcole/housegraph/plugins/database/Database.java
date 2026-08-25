@@ -164,6 +164,87 @@ public final class Database {
     }
 
     /**
+     * Changes the given columns on every row matching the criteria, adding any column the table
+     * doesn't have yet — the same inference {@link #insert} performs, so "record who last did this
+     * chore" works on a table that has never had a {@code who} column.
+     * <p>
+     * <b>A null value changes nothing</b>, exactly as it stores nothing on insert: an unwired input
+     * must not be able to overwrite stored data with a null. Set a column to the empty string to
+     * clear it — that is what {@link Match#IS_EMPTY} treats as empty anyway.
+     * <p>
+     * <b>Empty criteria update every row.</b> That is what {@code UPDATE} without a {@code WHERE}
+     * means, and it is the caller's business to be sure: the node refuses it (see the nodes package),
+     * because a condition set that came out empty by accident is how a graph on a timer overwrites a
+     * whole table.
+     *
+     * @param table    the table to change
+     * @param criteria the conditions, ANDed together; empty matches every row
+     * @param values   the new values by column name
+     * @return how many rows changed
+     * @throws DatabaseException if nothing is being set, or the update can't be run
+     */
+    public int update(String table, List<Criterion> criteria, Map<?, ?> values) {
+        Map<String, Object> changes = columnValues(values);
+        if (changes.isEmpty()) {
+            throw new DatabaseException("There is nothing to set, so updating \"" + table + "\" would do nothing");
+        }
+        synchronized (this) {
+            Connection connection = connection();
+            if (!hasTable(table)) {
+                return 0;
+            }
+            return inTransaction(connection, () -> {
+                addMissingColumns(connection, table, changes.keySet());
+                StringBuilder sql = new StringBuilder("UPDATE ").append(Sql.identifier(table)).append(" SET ");
+                List<Object> bindings = new ArrayList<>();
+                boolean first = true;
+                for (Map.Entry<String, Object> change : changes.entrySet()) {
+                    if (!first) {
+                        sql.append(", ");
+                    }
+                    sql.append(Sql.identifier(change.getKey())).append(" = ?");
+                    bindings.add(change.getValue());
+                    first = false;
+                }
+                bindings.addAll(appendWhere(sql, criteria));
+                try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                    bindAll(statement, bindings);
+                    return statement.executeUpdate();
+                }
+            }, "update rows in \"" + table + "\"");
+        }
+    }
+
+    /**
+     * Removes every row matching the criteria.
+     * <p>
+     * <b>Empty criteria delete every row</b>, which is what {@code DELETE} without a {@code WHERE}
+     * means. The node refuses that — see {@link #update} for why — and this does not, because the SQL
+     * nodes exist for the deliberate case.
+     *
+     * @param table    the table to delete from
+     * @param criteria the conditions, ANDed together; empty matches every row
+     * @return how many rows went
+     * @throws DatabaseException if the delete can't be run
+     */
+    public int delete(String table, List<Criterion> criteria) {
+        synchronized (this) {
+            Connection connection = connection();
+            if (!hasTable(table)) {
+                return 0;
+            }
+            StringBuilder sql = new StringBuilder("DELETE FROM ").append(Sql.identifier(table));
+            List<Object> bindings = appendWhere(sql, criteria);
+            try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                bindAll(statement, bindings);
+                return statement.executeUpdate();
+            } catch (SQLException e) {
+                throw failure("delete rows from \"" + table + "\"", e);
+            }
+        }
+    }
+
+    /**
      * How many rows the table holds, or 0 when it doesn't exist yet.
      *
      * @param table the table to count
