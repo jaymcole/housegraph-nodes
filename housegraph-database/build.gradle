@@ -1,0 +1,41 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-database'
+    libraryName = 'Database'
+    description = 'A local SQLite database for many records: insert rows, find rows, with columns that appear as you use them.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.database.nodes']
+}
+
+dependencies {
+    // SQLite, as one file per database, through the JDBC driver that bundles the native library
+    // for every platform. Chosen over a pure-Java engine (H2, HSQLDB) for its stable-forever file
+    // format: this repository re-releases every library on an API bump, and an engine whose
+    // on-disk format changes between versions would turn a routine upgrade into "the user's six
+    // months of sensor history can no longer be opened".
+    implementation('org.xerial:sqlite-jdbc:3.53.2.1') {
+        // sqlite-jdbc depends on slf4j-api itself (confirmed via `gradlew :housegraph-database:dependencies`).
+        // Left alone it lands in the shaded jar, which the host's install-time validation rejects the
+        // whole library for — a bundled slf4j-api is a second logging binding with no outputs
+        // attached, so every log line from every library silently vanishes. Same fix as
+        // housegraph-discord (JDA), housegraph-web (jmdns) and housegraph-ml (DJL); the fourth
+        // library to need it.
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
+}
+
+shadowJar {
+    // Not relocated, deliberately, unlike the template's default advice — the same call
+    // housegraph-ml makes for DJL, and for the same reason. sqlite-jdbc loads a native library by
+    // extracting it from a resource path built at runtime from its own package name; relocation
+    // rewrites classes, resource paths and string constants, and whether all three stay consistent
+    // is a property of the shading tool rather than of anything declared here. The failure mode is
+    // "UnsatisfiedLinkError in the user's install, not in CI". housegraph-database is the only
+    // library bundling SQLite, so there is nothing to collide with yet. Revisit if a second one
+    // ever bundles it — and see Database#open, which takes the connection from the driver class
+    // directly rather than through DriverManager, so that a second copy could not silently answer
+    // for jdbc:sqlite: URLs anyway.
+    mergeServiceFiles()
+}
