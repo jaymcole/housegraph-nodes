@@ -4,42 +4,25 @@ import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.resource.Subscription;
 import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
-import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
-import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
-import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
-import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.InteractionHook;
-import net.dv8tion.jda.api.interactions.commands.OptionMapping;
-import net.dv8tion.jda.api.interactions.commands.OptionType;
-import net.dv8tion.jda.api.interactions.commands.build.Commands;
-import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
-import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
-import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
- * A thin wrapper around a JDA gateway connection — the long-lived resource behind a
- * Discord bot node. JDA keeps the connection alive (heartbeats, reconnects) as long as
- * the instance is held; this class just manages hold/release and adapts JDA's async,
- * multi-threaded world to the simple surface the rest of this library needs:
+ * One Discord bot node's handle on a Discord connection — the long-lived resource behind a Discord
+ * Bot node. It adapts JDA's async, multi-threaded world to the simple surface the rest of this
+ * library needs:
  * <ul>
  *   <li>{@link #connect} logs in and blocks until the gateway is ready (call it off the
- *       UI thread); {@link #disconnect} shuts it down.</li>
+ *       UI thread); {@link #disconnect} releases it.</li>
  *   <li>incoming (non-bot) messages are delivered to every {@link #addMessageListener
  *       listener} — one instance is meant to be wired, via the Discord Bot node's output
  *       port, into several command nodes at once, so listeners are a list rather than a
@@ -53,60 +36,71 @@ import java.util.function.Consumer;
  * </ul>
  * Reading message content needs the privileged <b>MESSAGE_CONTENT</b> intent enabled for
  * the bot in Discord's developer portal; slash commands need no special intent.
+ * <p>
+ * <b>The connection underneath is shared, this handle is not.</b> A token gets one gateway session
+ * per process — see {@link DiscordGateway} for why Discord leaves no choice — and connecting joins
+ * that session rather than opening a second one. What stays private to this instance is everything
+ * a node wires up for itself: its listeners, the commands it declares, its button preferences. So
+ * two Discord Bot nodes on one token both work, each driving its own graph, off one connection;
+ * and because a node's handle is never swapped for someone else's, everything captured from it
+ * (see {@code DiscordBotNode.botFrom}) stays valid across a connect.
  */
 public final class DiscordBot {
 
     private static final Logger log = Log.get(DiscordBot.class);
 
     private final Object lock = new Object();
-    private JDA jda;
+    /** The session this handle has joined, or null while disconnected. */
+    private DiscordGateway gateway;
     private volatile String guildId;
-    /** Command name (lowercase) -> whether its reply is ephemeral; consulted when deferring an interaction. */
-    private final Map<String, Boolean> ephemeralByCommand = new ConcurrentHashMap<>();
     /**
-     * Button id -> whether a click on it should be deferred ephemerally; consulted when
-     * deferring a button interaction. An id absent from this map (e.g. a button this bot didn't
-     * send) defaults to ephemeral, the safer choice when nothing declared a preference.
+     * Button id -> whether a click on it should be deferred ephemerally, as declared through this
+     * handle. Consulted, along with every other handle on the same session, when deferring a
+     * button interaction. An id no handle has declared defaults to ephemeral, the safer choice
+     * when nothing declared a preference.
      */
     private final Map<String, Boolean> ephemeralByButton = new ConcurrentHashMap<>();
+    /** What {@link #syncCommands} was last asked to register for this handle; unioned per session. */
+    private volatile List<SlashCommandSpec> declaredCommands = List.of();
     private final CopyOnWriteArrayList<Consumer<DiscordMessage>> messageListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<DiscordSlashCommand>> slashListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<DiscordButtonClick>> buttonListeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Logs in with {@code token} and blocks until the gateway is ready. Call from a
-     * background thread — it waits on the network.
+     * Joins this process's gateway session for {@code token}, logging in and blocking until the
+     * gateway is ready if this is the first handle to ask for it. Call from a background thread —
+     * it waits on the network.
+     * <p>
+     * A no-op if this handle has already joined a session, even one that is momentarily down: JDA
+     * owns reconnection within a session, and a second login here would strand the first. Forcing
+     * a fresh login means {@link #disconnect()} first.
      *
      * @throws InterruptedException if interrupted while awaiting readiness
      * @throws RuntimeException     if the token is invalid or login otherwise fails
      */
     public void connect(String token) throws InterruptedException {
-        JDA built = JDABuilder.createLight(token, EnumSet.of(GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT))
-                .addEventListeners(new MessageBridge())
-                .build()
-                .awaitReady();
-        synchronized (lock) {
-            this.jda = built;
+        if (session() != null) {
+            return;
         }
-        log.info("Discord bot connected as \"{}\" ({} guild(s) visible)", built.getSelfUser().getName(), built.getGuilds().size());
+        // The session sets this handle's own reference as it admits it (see #joined).
+        DiscordGateway.join(token, this);
     }
 
+    /**
+     * Releases this handle's claim on the connection. The underlying session is only shut down
+     * once every handle sharing it has disconnected, so this is safe to call whether this node
+     * opened the connection or joined one someone else opened.
+     */
     public void disconnect() {
-        JDA current;
-        synchronized (lock) {
-            current = jda;
-            jda = null;
-        }
+        DiscordGateway current = session();
         if (current != null) {
-            current.shutdownNow();
-            log.info("Discord bot disconnected");
+            current.leave(this);
         }
     }
 
     public boolean isConnected() {
-        synchronized (lock) {
-            return jda != null && jda.getStatus() == JDA.Status.CONNECTED;
-        }
+        DiscordGateway current = session();
+        return current != null && current.isConnected();
     }
 
     /** Adds a listener for incoming (non-bot) messages; call {@link Subscription#cancel()} to stop. Delivered on a JDA thread. */
@@ -137,9 +131,19 @@ public final class DiscordBot {
         ephemeralByButton.remove(buttonId);
     }
 
-    /** Whether a click on {@code buttonId} would currently be deferred ephemerally — the same lookup {@link #setButtonEphemeral} feeds. */
+    /**
+     * Whether a click on {@code buttonId} would currently be deferred ephemerally — the same
+     * lookup {@link #setButtonEphemeral} feeds. While connected this is the session's answer,
+     * which takes every handle sharing it into account, since that is what actually happens at
+     * defer time.
+     */
     public boolean isButtonEphemeral(String buttonId) {
-        return ephemeralByButton.getOrDefault(buttonId, true);
+        DiscordGateway current = session();
+        if (current != null) {
+            return current.isButtonEphemeral(buttonId);
+        }
+        Boolean preference = ephemeralByButton.get(buttonId);
+        return preference == null || preference;
     }
 
     /** The guild (server) id to register slash commands to for instant availability; null/blank registers globally (slow to propagate). */
@@ -148,55 +152,21 @@ public final class DiscordBot {
     }
 
     /**
-     * Registers exactly {@code specs} as this bot's slash commands, each with one
-     * optional text argument, and remembers their ephemeral flags for deferring. Replaces
-     * the previous set. Registers to the configured {@link #setGuildId guild} if set
-     * (instant), otherwise globally (~1 hour to propagate). A no-op if not connected.
+     * Declares exactly {@code specs} as this handle's slash commands, each with one optional text
+     * argument, and registers them with Discord. Replaces this handle's previous set. Registers to
+     * the configured {@link #setGuildId guild} if set (instant), otherwise globally (~1 hour to
+     * propagate). A no-op if not connected.
      * <p>
-     * A spec with {@link SlashCommandSpec#hiddenByDefault()} set registers with its default
-     * member permissions disabled, hiding it from everyone's command picker. Discord only
-     * lets a bot control that all-or-nothing default; granting the command back to specific
-     * roles is a manual step a server admin does per-guild, in Server Settings ->
-     * Integrations — there is no bot-token API left for setting per-role command privileges.
+     * What actually reaches Discord is the union across every handle sharing this connection, not
+     * this handle's set alone: the command list belongs to the Discord application, and a bare
+     * overwrite would mean whichever Discord Bot node synced last silently wiped the others'
+     * commands. See {@link DiscordGateway#syncCommands()}.
      */
     public void syncCommands(Collection<SlashCommandSpec> specs) {
-        JDA current;
-        String guild;
-        synchronized (lock) {
-            current = jda;
-            guild = guildId;
-        }
-        if (current == null) {
-            return;
-        }
-        ephemeralByCommand.clear();
-        List<SlashCommandData> data = new ArrayList<>();
-        for (SlashCommandSpec spec : specs) {
-            String name = spec.name().toLowerCase(Locale.ROOT);
-            try {
-                SlashCommandData command = Commands.slash(name, spec.description());
-                for (CommandOption option : spec.options()) {
-                    command.addOption(toJdaType(option.type()), option.name().toLowerCase(Locale.ROOT), option.name(), false);
-                }
-                if (spec.hiddenByDefault()) {
-                    // Hides the command from everyone's picker at registration time. Discord no
-                    // longer lets a bot grant it back to specific roles itself — that's a manual
-                    // step a server admin does per-guild in Server Settings -> Integrations.
-                    command.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
-                }
-                data.add(command);
-                ephemeralByCommand.put(name, spec.ephemeral());
-            } catch (IllegalArgumentException e) {
-                // Discord requires lowercase names of letters/digits/-/_ ; skip a bad one
-                // rather than failing registration of every command.
-                log.warn("Skipping invalid slash command '{}': {}", name, e.getMessage());
-            }
-        }
-        Guild target = guild == null ? null : current.getGuildById(guild);
-        if (target != null) {
-            target.updateCommands().addCommands(data).queue();
-        } else {
-            current.updateCommands().addCommands(data).queue();
+        declaredCommands = List.copyOf(specs);
+        DiscordGateway current = session();
+        if (current != null) {
+            current.syncCommands();
         }
     }
 
@@ -212,15 +182,13 @@ public final class DiscordBot {
      * the button's id.
      */
     public void sendMessage(String channelId, String text, List<DiscordButtonSpec> buttons) {
-        JDA current;
-        synchronized (lock) {
-            current = jda;
-        }
-        if (current == null) {
+        DiscordGateway current = session();
+        JDA jda = current == null ? null : current.jda();
+        if (jda == null) {
             log.warn("Cannot send message to channel \"{}\": bot is not connected", channelId);
             return;
         }
-        MessageChannel channel = current.getChannelById(MessageChannel.class, channelId);
+        MessageChannel channel = jda.getChannelById(MessageChannel.class, channelId);
         if (channel == null) {
             log.warn("Cannot send message to channel \"{}\": no such channel in this bot's cache "
                     + "(check the channel id, and that the bot has been invited to the server and can see the channel)", channelId);
@@ -239,76 +207,54 @@ public final class DiscordBot {
                 failure -> log.error("Discord rejected the message to channel \"{}\": {}", channelId, failure.getMessage()));
     }
 
-    private final class MessageBridge extends ListenerAdapter {
-        @Override
-        public void onMessageReceived(MessageReceivedEvent event) {
-            if (event.getAuthor().isBot()) {
-                return; // ignore our own and other bots' messages
-            }
-            DiscordMessage message = new DiscordMessage(
-                    event.getMessage().getContentDisplay(),
-                    event.getChannel().getId(),
-                    event.getAuthor().getId(),
-                    event.getAuthor().getEffectiveName());
-            messageListeners.forEach(listener -> listener.accept(message));
-        }
+    // --- What the shared session reads and calls back into --------------------------------------
 
-        @Override
-        public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
-            // Acknowledge within Discord's 3s window; the real answer is sent later
-            // through the hook (valid ~15 min), so a slow graph still gets to reply.
-            // Ephemeral (invoker-only) is decided here, at defer time.
-            boolean ephemeral = ephemeralByCommand.getOrDefault(event.getName(), false);
-            event.deferReply(ephemeral).queue();
-            InteractionHook hook = event.getHook();
-            DiscordReply reply = text -> hook.editOriginal(text).queue();
+    /** The guild id this handle registers its commands to, or null for globally. */
+    String guildId() {
+        return guildId;
+    }
 
-            Map<String, String> options = new java.util.HashMap<>();
-            for (OptionMapping option : event.getOptions()) {
-                options.put(option.getName(), option.getAsString());
-            }
-            DiscordSlashCommand slashCommand = new DiscordSlashCommand(
-                    event.getName(),
-                    options,
-                    event.getChannel().getId(),
-                    event.getUser().getId(),
-                    event.getUser().getEffectiveName(),
-                    reply);
-            slashListeners.forEach(listener -> listener.accept(slashCommand));
-        }
+    /** What {@link #syncCommands} last declared for this handle. */
+    List<SlashCommandSpec> declaredCommands() {
+        return declaredCommands;
+    }
 
-        @Override
-        public void onButtonInteraction(ButtonInteractionEvent event) {
-            // Same defer-then-answer-via-hook treatment as slash commands (~15 min to reply).
-            // Ephemeral is decided by whoever declared this button id (see
-            // #setButtonEphemeral) — normally a Discord Send Buttons node, deciding based on
-            // whether anything is actually wired to its Reply output. An undeclared id (e.g. a
-            // button this bot didn't send) defaults to ephemeral, the safer choice.
-            event.deferReply(isButtonEphemeral(event.getComponentId())).queue();
-            InteractionHook hook = event.getHook();
-            DiscordReply reply = text -> hook.editOriginal(text).queue();
+    /** This handle's ephemeral preference for {@code buttonId}, or null if it declared none. */
+    Boolean buttonPreference(String buttonId) {
+        return ephemeralByButton.get(buttonId);
+    }
 
-            // Disable the clicked message's buttons so it can't be pressed again. A plain
-            // message edit, independent of the interaction's own ack/reply above.
-            List<Button> disabled = event.getMessage().getButtons().stream().map(Button::asDisabled).toList();
-            event.getMessage().editMessageComponents(ActionRow.partitionOf(disabled)).queue();
-
-            DiscordButtonClick click = new DiscordButtonClick(
-                    event.getComponentId(),
-                    event.getChannel().getId(),
-                    event.getUser().getId(),
-                    event.getUser().getEffectiveName(),
-                    reply);
-            buttonListeners.forEach(listener -> listener.accept(click));
+    /** Called by a session as it admits this handle. */
+    void joined(DiscordGateway session) {
+        synchronized (lock) {
+            gateway = session;
         }
     }
 
-    private static OptionType toJdaType(DiscordOptionType type) {
-        return switch (type) {
-            case TEXT -> OptionType.STRING;
-            case INTEGER -> OptionType.INTEGER;
-            case BOOLEAN -> OptionType.BOOLEAN;
-            case USER -> OptionType.USER;
-        };
+    /** Called by a session as it drops this handle; ignores a session this handle isn't on. */
+    void left(DiscordGateway session) {
+        synchronized (lock) {
+            if (gateway == session) {
+                gateway = null;
+            }
+        }
+    }
+
+    void deliverMessage(DiscordMessage message) {
+        messageListeners.forEach(listener -> listener.accept(message));
+    }
+
+    void deliverSlashCommand(DiscordSlashCommand command) {
+        slashListeners.forEach(listener -> listener.accept(command));
+    }
+
+    void deliverButtonClick(DiscordButtonClick click) {
+        buttonListeners.forEach(listener -> listener.accept(click));
+    }
+
+    private DiscordGateway session() {
+        synchronized (lock) {
+            return gateway;
+        }
     }
 }
