@@ -10,7 +10,6 @@ import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
-import io.github.jaymcole.housegraph.plugins.discord.DiscordBotRegistry;
 import io.github.jaymcole.housegraph.plugins.discord.SlashCommandRegistry;
 import io.github.jaymcole.housegraph.sdk.AutoStartable;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
@@ -57,9 +56,16 @@ import java.util.Map;
  * (see {@link AutoStartable}).
  * <p>
  * Two Discord Bot nodes wired to the same token — in this graph or another one loaded into the
- * same running app — do not each open their own gateway connection: {@link DiscordBotRegistry}
- * dedupes by token, so the second node to Connect shares the first's live {@link DiscordBot}
- * instead. See {@link #connectBot()} and {@link #disconnectBot()}.
+ * same running app — do not each open their own gateway connection. Discord gives a token one
+ * gateway session and replaces the old one when a second logs in, so a second connection wouldn't
+ * be a second bot, it would be the first bot being kicked. Deduplication happens a level below
+ * this node, inside {@link DiscordBot}: connecting joins this process's session for the token, and
+ * the session is only torn down once every node using it has disconnected. This node's own handle
+ * is never swapped for another node's, so everything captured from it stays valid.
+ * <p>
+ * That covers one process. HouseGraph's daemon runs one JVM per graph, so two <em>graphs</em> on
+ * one token are two processes with no way to see each other, and there Discord's one-session rule
+ * still bites: see {@code docs/design/discord-one-token-one-session.md}.
  */
 @Display.Name("Discord Bot")
 @Node.Type("discord.DiscordBotNode")
@@ -69,13 +75,12 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     private static final String DEFAULT_NAME = "discord";
 
     /**
-     * This node's own {@link DiscordBot} handle. Not final: while connected, it may instead point
-     * at another node's instance shared via {@link DiscordBotRegistry} (see {@link #connectBot()}),
-     * and {@link #disconnectBot()} always leaves it pointing at a fresh, unconnected instance again.
+     * This node's own {@link DiscordBot} handle, for its whole life. Sharing a connection with
+     * another node on the same token happens inside the handle, not by exchanging handles: other
+     * nodes capture this instance when the wire appears (see {@link #botFrom(Edge)}), so swapping
+     * it at Connect would leave them holding one that never connects.
      */
-    private DiscordBot bot = new DiscordBot();
-    /** The token this node is currently registered under in {@link DiscordBotRegistry}, or null if not connected/joined. */
-    private String connectedToken;
+    private final DiscordBot bot = new DiscordBot();
 
     private final NodeVariable<String> nameInput =
             withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
@@ -112,16 +117,10 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
         // the variable), leaving the constructor's seeding wiped and every downstream pull reading
         // null forever. See botFrom(Edge) for the edge-time half of the same problem.
         botOutput.setValue(bot);
-        try {
-            if (ctx.wasTriggeredVia(disconnectIn)) {
-                disconnectBot();
-            } else {
-                connectBot();
-            }
-        } finally {
-            // connectBot()/disconnectBot() may have reassigned `bot` (joined or released a
-            // DiscordBotRegistry-shared instance), so re-assert once more with whatever it now is.
-            botOutput.setValue(bot);
+        if (ctx.wasTriggeredVia(disconnectIn)) {
+            disconnectBot();
+        } else {
+            connectBot();
         }
     }
 
@@ -168,64 +167,33 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
         if (token == null || token.isBlank()) {
             throw new IllegalStateException("Pick a token secret first");
         }
-        if (token.equals(connectedToken)) {
-            // Already registered (as owner or as a joiner) for this exact token — the shared
-            // connection may simply still be coming up on another thread. A redundant Connect
-            // must not attempt a second acquire, which would otherwise mistake this node's own
-            // already-shared `bot` for a fresh candidate and re-run connect() on it.
-            return;
-        }
-        DiscordBot acquired = DiscordBotRegistry.shared().acquire(token, bot);
-        if (acquired != bot) {
-            // Another Discord Bot node — this graph or another one loaded into this app — already
-            // holds a live connection for this token: share its DiscordBot/JDA session rather than
-            // opening a second gateway connection under the same token (duplicate event delivery,
-            // interaction-ack races, command-sync 429s).
-            bot = acquired;
-            connectedToken = token;
-            return;
-        }
-        connectedToken = token;
         try {
+            // Joins this process's session for the token — opening it if this is the first node
+            // to ask, sharing it if another node already has (see DiscordBot/DiscordGateway).
             bot.connect(token);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Discord connect failed: {}", e);
-            DiscordBotRegistry.shared().release(token, bot);
-            connectedToken = null;
             throw new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
         } catch (RuntimeException e) {
             // The exception text won't contain the token, but keep the UI message generic
             // and log only the type/message, never the token itself.
             log.error("Discord connect failed: {}", e);
-            DiscordBotRegistry.shared().release(token, bot);
-            connectedToken = null;
             throw new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
         }
         bot.setGuildId(guildIdInput.getValue());
+        // Registers the union across every node sharing this session, so this doesn't wipe the
+        // commands another Discord Bot node on the same token registered.
         bot.syncCommands(SlashCommandRegistry.shared().commandsFor(bot));
     }
 
     /**
-     * Undoes whatever {@link #connectBot()} did, whether this node was the owner of a
-     * {@link DiscordBotRegistry}-tracked connection or a joiner sharing someone else's: releases
-     * this node's reference and only actually calls {@link DiscordBot#disconnect()} when
-     * {@link DiscordBotRegistry#release} reports this was the last one. Either way, {@link #bot}
-     * ends up pointing at a fresh, unconnected instance again — this node's own output/UI must
-     * reflect that it, specifically, is disconnected, even if the underlying gateway session lives
-     * on for other nodes still using it.
+     * Undoes {@link #connectBot()}: drops this node's claim on the connection. Whether that
+     * actually closes the gateway session is {@link DiscordBot}'s business — it stays open for any
+     * other node on the same token that is still using it, and closes when the last one lets go.
      */
     private void disconnectBot() {
-        if (connectedToken == null) {
-            bot.disconnect(); // safety net; normally already disconnected in this state
-            return;
-        }
-        boolean wasLastReference = DiscordBotRegistry.shared().release(connectedToken, bot);
-        connectedToken = null;
-        if (wasLastReference) {
-            bot.disconnect();
-        }
-        bot = new DiscordBot();
+        bot.disconnect();
     }
 
     @Override
@@ -293,10 +261,8 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
 
     @Override
     protected void onRemoved() {
-        // Goes through disconnectBot(), not a direct bot.disconnect(): if this node is a joiner
-        // sharing another node's connection, a direct call would tear the gateway session down
-        // out from under it. Deleting an owner node with joiners still attached correctly leaves
-        // the connection alive (see DiscordBotRegistry) — deleting the last node using it doesn't.
+        // Deleting one node that shares a connection with others on the same token leaves that
+        // connection up for them; deleting the last one closes it (see DiscordGateway).
         disconnectBot();
     }
 
@@ -346,9 +312,6 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     }
 
     private void disconnect() {
-        // Routes through disconnectBot(), not a direct bot.disconnect(): this node may be a
-        // joiner sharing another node's DiscordBotRegistry-tracked connection, and a direct call
-        // would tear that shared connection down out from under it.
         disconnectBot();
         statusLabel.setText("Disconnected");
         connectButton.setDisable(false);
