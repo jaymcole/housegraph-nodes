@@ -1,16 +1,26 @@
 # One token, one session
 
 Why several **Discord Bot** nodes on the same token don't each get their own connection, what this
-library now does about it, and the part that is still open — the daemon.
+library now does about it, and the one case that is still open — the same token in two graph
+*files*.
 
 ---
 
 ## 1. The symptom
 
-Start two graphs that each carry a Discord Bot node on the same token, at the same time, under
-`housegraph daemon`, and only one bot ends up working. The others connect and then go quiet: no
-messages, no slash commands, no button clicks. Nothing in the graph is wrong, and each of them
-works perfectly on its own.
+Put several Discord Bot nodes on the same token, start them at the same time — most visibly under
+`housegraph daemon`, which resumes every node that was connected when the graph was saved at once —
+and only one of them ends up working. The rest connect and then go quiet: no messages, no slash
+commands, no button clicks. Nothing in the graph is wrong, and each of them works perfectly on its
+own.
+
+This is one symptom with two different scopes behind it, and they need different answers:
+
+- **Several bot nodes in one graph.** One graph file is one process, however many disjoint clusters
+  are drawn in it, so this is several connections opened from inside one JVM. Sections 3 and 4
+  cover it, and it is fixed.
+- **Two graph files on one token.** The daemon runs a process per file, so these can't see each
+  other. Section 5, still open.
 
 ## 2. Why: a token is one bot, and a bot is one session
 
@@ -19,8 +29,8 @@ session. A second login on the same token is not a second bot — it is the same
 again, and only one of those logins ends up holding the connection Discord delivers events to.
 
 Sharding is not a way around this. Shards split *guilds* across sessions; they don't hand the same
-event to two sessions. Two processes on two shards would each see half the servers, which is not
-"both graphs get their messages" — it's a different kind of broken.
+event to two sessions. Two connections on two shards would each see half the servers, which is not
+"both of them get their messages" — it's a different kind of broken.
 
 So there is no arrangement in which N independent connections on one token all work. The only
 thing that works is **one connection, shared**.
@@ -30,7 +40,10 @@ thing that works is **one connection, shared**.
 Deduplication happens at the level of the *session*, not the node's handle:
 
 - `DiscordGateway` keeps one session per token for the process. The first `DiscordBot` to connect
-  opens it; later ones on the same token join it. It closes when the last one leaves.
+  opens it; later ones on the same token join it. It closes when the last one leaves. Joining is
+  serialized on the token, because the case that matters is the concurrent one: a load resumes
+  every connected-at-save bot node at once, each on its own thread, and without that serialization
+  two of them could both decide they were the first.
 - The session owns everything that must happen once per connection: the JDA instance, the single
   event bridge (an interaction may only be acknowledged once, so deferring happens before the fan
   out), and the slash-command sync — which registers the **union** of every joined bot's commands,
@@ -71,20 +84,22 @@ wrong.
 
 Within one graph, this removes the reason to have a second Discord Bot node at all.
 
-## 5. What this does not cover: the daemon
+## 5. What this does not cover: one token in two graph files
 
-All of the above is **within one process**.
+All of the above is **within one process** — which, to be clear about what that includes, is one
+graph *file*. Several Discord Bot nodes in one file, in disjoint clusters or not, are one process
+and are covered.
 
-`housegraph daemon` runs [one JVM per graph](https://github.com/jaymcole/HouseGraph/blob/main/app/src/main/java/io/github/jaymcole/housegraph/remote/GraphProcess.java) —
+`housegraph daemon` runs [one JVM per graph file](https://github.com/jaymcole/HouseGraph/blob/main/app/src/main/java/io/github/jaymcole/housegraph/remote/GraphProcess.java) —
 deliberately, so one wedged graph takes only itself down and a node-library update needs only that
-graph's restart. Two *graphs* on one token are therefore two processes that cannot see each other,
-and nothing in this library can dedupe across them. Section 1's symptom is exactly this case, and
-it is still open.
+graph's restart. Two *files* on one token are therefore two processes that cannot see each other,
+and nothing in this library can dedupe across them. This half of section 1's symptom is still
+open.
 
-If the several graphs exist for tidiness too, the first question is whether they want to be one
-graph — section 4's reference node makes a single graph with many Discord workflows tolerable to
-look at, and one graph is one process. Where they genuinely are separate deployments, there are only
-three shapes of answer, and none of them is free:
+If the several files exist for tidiness rather than as separate deployments, the first question is
+whether they want to be one file — section 4's reference node makes a single graph with many
+Discord workflows tolerable to look at, and one file is one process. Where they genuinely are
+separate deployments, there are only three shapes of answer, and none of them is free:
 
 | Option | What it gives you | What it costs |
 | --- | --- | --- |

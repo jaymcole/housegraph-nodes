@@ -64,9 +64,10 @@ import java.util.Map;
  * the session is only torn down once every node using it has disconnected. This node's own handle
  * is never swapped for another node's, so everything captured from it stays valid.
  * <p>
- * That covers one process. HouseGraph's daemon runs one JVM per graph, so two <em>graphs</em> on
- * one token are two processes with no way to see each other, and there Discord's one-session rule
- * still bites: see {@code docs/design/discord-one-token-one-session.md}.
+ * That covers one process, which is one graph <em>file</em> — any number of bot nodes in one file,
+ * disjoint clusters or not, share its session. HouseGraph's daemon runs a JVM per file, so only two
+ * <em>files</em> on one token are beyond reach of this, and there Discord's one-session rule still
+ * bites: see {@code docs/design/discord-one-token-one-session.md}.
  * <p>
  * If the reason for a second Discord Bot node is that one node's wiring has become unreadable
  * rather than that a second connection is wanted, {@link DiscordBotRefNode} is the node for that:

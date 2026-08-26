@@ -54,10 +54,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * ephemeral flags consulted at defer time.
  *
  * <h2>Scope: this process only</h2>
- * This dedupes within one JVM. HouseGraph's daemon runs <em>one JVM per graph</em>, so two graphs
- * that both carry a Discord Bot node on the same token are two processes, and nothing here can see
- * across them — that is the cross-process case, and it still ends in Discord replacing one session
- * with the other.
+ * This dedupes within one JVM, which is one graph <em>file</em>: every Discord Bot node in a file,
+ * however disjoint the clusters they sit in, shares its session. HouseGraph's daemon runs
+ * <em>one JVM per file</em>, so two files that both carry a Discord Bot node on the same token are
+ * two processes, and nothing here can see across them — that case still ends with one of the two
+ * sessions holding the connection and the other going quiet.
  */
 final class DiscordGateway {
 
