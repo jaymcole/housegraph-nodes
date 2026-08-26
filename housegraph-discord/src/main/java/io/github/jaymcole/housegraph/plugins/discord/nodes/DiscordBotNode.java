@@ -72,10 +72,13 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
      * This node's own {@link DiscordBot} handle. Not final: while connected, it may instead point
      * at another node's instance shared via {@link DiscordBotRegistry} (see {@link #connectBot()}),
      * and {@link #disconnectBot()} always leaves it pointing at a fresh, unconnected instance again.
+     * Volatile: read and written from whichever thread drives this node's process() — the manual
+     * Connect button's own thread, {@link #autoStartIfWasRunning()}'s thread, and any thread the
+     * engine uses to resolve a downstream data pull — none of which coordinate with each other.
      */
-    private DiscordBot bot = new DiscordBot();
+    private volatile DiscordBot bot = new DiscordBot();
     /** The token this node is currently registered under in {@link DiscordBotRegistry}, or null if not connected/joined. */
-    private String connectedToken;
+    private volatile String connectedToken;
 
     private final NodeVariable<String> nameInput =
             withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
@@ -175,35 +178,57 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
             // already-shared `bot` for a fresh candidate and re-run connect() on it.
             return;
         }
-        DiscordBot acquired = DiscordBotRegistry.shared().acquire(token, bot);
-        if (acquired != bot) {
+        DiscordBotRegistry.Entry entry = DiscordBotRegistry.shared().acquire(token, bot);
+        connectedToken = token;
+        if (!entry.isOwner(bot)) {
             // Another Discord Bot node — this graph or another one loaded into this app — already
-            // holds a live connection for this token: share its DiscordBot/JDA session rather than
-            // opening a second gateway connection under the same token (duplicate event delivery,
-            // interaction-ack races, command-sync 429s).
-            bot = acquired;
-            connectedToken = token;
+            // holds (or is opening) a live connection for this token: share its DiscordBot/JDA
+            // session rather than opening a second gateway connection under the same token
+            // (duplicate event delivery, interaction-ack races, command-sync 429s). Connecting is a
+            // blocking network round trip (see DiscordBot#connect), so don't report this node ready
+            // just because it shares the reference — wait for the owner's own attempt to actually
+            // settle first. Without this wait, a node auto-started concurrently with its owner would
+            // read the still-connecting shared bot as disconnected right now and never learn
+            // otherwise, and would be left sharing a dead connection forever if the owner's attempt
+            // ultimately failed.
+            bot = entry.bot;
+            try {
+                entry.awaitSettled();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                connectedToken = null;
+                DiscordBotRegistry.shared().release(token, bot);
+                throw new RuntimeException("Interrupted while waiting for a shared Discord connection", e);
+            } catch (RuntimeException e) {
+                connectedToken = null;
+                DiscordBotRegistry.shared().release(token, bot);
+                throw e;
+            }
             return;
         }
-        connectedToken = token;
         try {
             bot.connect(token);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Discord connect failed: {}", e);
+            RuntimeException failure = new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
+            entry.settleFailed(failure);
             DiscordBotRegistry.shared().release(token, bot);
             connectedToken = null;
-            throw new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
+            throw failure;
         } catch (RuntimeException e) {
             // The exception text won't contain the token, but keep the UI message generic
             // and log only the type/message, never the token itself.
             log.error("Discord connect failed: {}", e);
+            RuntimeException failure = new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
+            entry.settleFailed(failure);
             DiscordBotRegistry.shared().release(token, bot);
             connectedToken = null;
-            throw new RuntimeException("Connect failed — check token & MESSAGE_CONTENT intent", e);
+            throw failure;
         }
         bot.setGuildId(guildIdInput.getValue());
         bot.syncCommands(SlashCommandRegistry.shared().commandsFor(bot));
+        entry.settleConnected();
     }
 
     /**
