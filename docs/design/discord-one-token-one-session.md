@@ -46,7 +46,32 @@ graph load, before anything connects — so a node that swapped its handle at Co
 leave every node wired to it holding one that never connects. Sharing the session underneath keeps
 those captures valid.
 
-## 4. What this does not cover: the daemon
+## 4. If you wanted several bot nodes for tidiness, use a reference
+
+One Discord Bot node wired into every workflow in a graph gets messy fast, and the obvious fix —
+drop another Discord Bot node next to the far cluster and give it the same token — is the thing
+section 2 says can't work.
+
+**Discord Bot Ref** is that fix without the connection. It names a Discord Bot node and hands out
+that node's handle on its own `Bot` output, so a distant cluster wires to something beside it
+instead of to a wire dragged across the canvas. It owns nothing, starts nothing and holds nothing
+open; everything wired to it behaves exactly as if wired to the bot node directly, because it is
+the same handle.
+
+```
+[Discord Bot "home"] ──── (this corner's nodes)
+
+[Discord Bot Ref "home"] ─ (that corner's nodes)      <- no second connection
+```
+
+The bot node publishes itself under its `Bot Name` when it joins the graph; the reference looks that
+name up on every read. So load order doesn't matter, and renaming either end takes effect at once.
+A name with no bot behind it resolves to nothing and says so on the node — the one way to get this
+wrong.
+
+Within one graph, this removes the reason to have a second Discord Bot node at all.
+
+## 5. What this does not cover: the daemon
 
 All of the above is **within one process**.
 
@@ -56,7 +81,10 @@ graph's restart. Two *graphs* on one token are therefore two processes that cann
 and nothing in this library can dedupe across them. Section 1's symptom is exactly this case, and
 it is still open.
 
-There are only three shapes of answer, and none of them is free:
+If the several graphs exist for tidiness too, the first question is whether they want to be one
+graph — section 4's reference node makes a single graph with many Discord workflows tolerable to
+look at, and one graph is one process. Where they genuinely are separate deployments, there are only
+three shapes of answer, and none of them is free:
 
 | Option | What it gives you | What it costs |
 | --- | --- | --- |

@@ -11,6 +11,7 @@ import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 import io.github.jaymcole.housegraph.plugins.discord.SlashCommandRegistry;
+import io.github.jaymcole.housegraph.resource.ResourceRegistry;
 import io.github.jaymcole.housegraph.sdk.AutoStartable;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import io.github.jaymcole.housegraph.sdk.Secrets;
@@ -66,6 +67,10 @@ import java.util.Map;
  * That covers one process. HouseGraph's daemon runs one JVM per graph, so two <em>graphs</em> on
  * one token are two processes with no way to see each other, and there Discord's one-session rule
  * still bites: see {@code docs/design/discord-one-token-one-session.md}.
+ * <p>
+ * If the reason for a second Discord Bot node is that one node's wiring has become unreadable
+ * rather than that a second connection is wanted, {@link DiscordBotRefNode} is the node for that:
+ * it hands out this node's handle by name, wherever on the canvas it is dropped, and opens nothing.
  */
 @Display.Name("Discord Bot")
 @Node.Type("discord.DiscordBotNode")
@@ -81,6 +86,8 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
      * it at Connect would leave them holding one that never connects.
      */
     private final DiscordBot bot = new DiscordBot();
+    /** The name this node's handle is currently published under, or null if it isn't. */
+    private String registeredName;
 
     private final NodeVariable<String> nameInput =
             withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
@@ -117,6 +124,7 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
         // the variable), leaving the constructor's seeding wiped and every downstream pull reading
         // null forever. See botFrom(Edge) for the edge-time half of the same problem.
         botOutput.setValue(bot);
+        publishByName();
         if (ctx.wasTriggeredVia(disconnectIn)) {
             disconnectBot();
         } else {
@@ -129,26 +137,72 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
      * {@code Bot} input — for the nodes that must capture it the moment the wire appears
      * (Command, Slash Command, Send Buttons) rather than pull it during {@code process()}.
      * <p>
-     * Reads the source output's value, and falls back to the source node's own handle when that
-     * value is null. That fallback is what makes a <em>loaded</em> graph work: {@code Bot} is a
-     * transient output, so it is saved as null and the loader applies that null back onto the
-     * variable, wiping what the constructor seeded — and edges are restored (firing the consumers'
-     * {@code onInputEdgeAdded}) before anything re-seeds it, so the eager capture would otherwise
-     * read null and the node would never subscribe. A {@link DiscordBotNode} always has its handle,
-     * from construction, whatever its output variable currently holds.
+     * Asks the source node rather than reading its output value, because on a <em>loaded</em> graph
+     * that value is not there yet: {@code Bot} is a transient output, so it is saved as null and the
+     * loader applies that null back onto the variable, wiping what the constructor seeded — and
+     * edges are restored (firing the consumers' {@code onInputEdgeAdded}) before anything re-seeds
+     * it, so reading the value would give null and the node would never subscribe. A
+     * {@link DiscordBotNode} always has its handle, from construction, and a
+     * {@link DiscordBotRefNode} can always resolve one by name, whatever either output currently
+     * holds. The value is the fallback, for a source that is neither.
      *
      * @param edge a data edge whose target is some node's {@code Bot} input
      * @return the bot on the other end, or null if the source carries none
      */
     static DiscordBot botFrom(Edge edge) {
-        Object value = edge.getSourceVariable().getValue();
-        if (value instanceof DiscordBot wired) {
-            return wired;
-        }
         if (edge.getSourceNode() instanceof DiscordBotNode source) {
             return source.bot;
         }
-        return null;
+        if (edge.getSourceNode() instanceof DiscordBotRefNode ref) {
+            // Asked fresh rather than read off the ref's output: a ref resolves by name, and
+            // whether its own output has been populated yet depends on where the bot node it names
+            // happened to sit in the load's node order.
+            return ref.resolve();
+        }
+        Object value = edge.getSourceVariable().getValue();
+        return value instanceof DiscordBot wired ? wired : null;
+    }
+
+    /**
+     * Publishes this node's handle under its {@code Bot Name} so a {@link DiscordBotRefNode}
+     * anywhere on the graph can wire to it without a wire — the whole point of which is that
+     * needing the bot in a second place is not a reason to add a second Discord Bot node, which
+     * would be a second claim on a connection Discord only grants once.
+     * <p>
+     * Runs on activation (after a load has applied the saved name, before any edge is wired, which
+     * is when the eager-capturing nodes ask) and again on every {@link #process}, so renaming the
+     * node moves the registration with it.
+     */
+    private void publishByName() {
+        String name = currentName();
+        if (name.equals(registeredName)) {
+            return;
+        }
+        withdrawByName();
+        ResourceRegistry.shared().find(name, DiscordBot.class).ifPresent(existing -> {
+            if (existing != bot) {
+                log.warn("Two Discord Bot nodes are both named \"{}\"; references to that name will "
+                        + "resolve to this one", name);
+            }
+        });
+        ResourceRegistry.shared().register(name, bot);
+        registeredName = name;
+    }
+
+    /** Withdraws this node's registration, leaving another node's registration under that name alone. */
+    private void withdrawByName() {
+        if (registeredName == null) {
+            return;
+        }
+        ResourceRegistry.shared().find(registeredName, DiscordBot.class)
+                .filter(registered -> registered == bot)
+                .ifPresent(registered -> ResourceRegistry.shared().unregister(registeredName));
+        registeredName = null;
+    }
+
+    @Override
+    protected void onActivated() {
+        publishByName();
     }
 
     private void connectBot() {
@@ -261,6 +315,7 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
 
     @Override
     protected void onRemoved() {
+        withdrawByName();
         // Deleting one node that shares a connection with others on the same token leaves that
         // connection up for them; deleting the last one closes it (see DiscordGateway).
         disconnectBot();
