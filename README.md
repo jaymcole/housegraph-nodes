@@ -21,6 +21,14 @@ they just share a build and a release.
 | `housegraph-llm` | Local LLM | nothing |
 | `housegraph-database` | Database, Insert Row, Find Rows, Update Rows, Delete Rows, SQL Query, SQL Statement | sqlite-jdbc |
 | `housegraph-datetime` | Milliseconds To Date Time | nothing |
+| `housegraph-app` | Graph Images | nothing |
+
+`housegraph-app` is the only library here that needs something back from the application: its
+Graph Images node asks HouseGraph to draw the open graph, which HouseGraph can only answer once it
+publishes the service written down in
+[`docs/design/graph-image-service.md`](docs/design/graph-image-service.md). Until it does, the node
+installs and appears like any other, and fails a run with a sentence saying which HouseGraph it
+needs.
 
 ## Installing
 

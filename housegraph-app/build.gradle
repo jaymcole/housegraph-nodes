@@ -1,0 +1,15 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-app'
+    libraryName = 'HouseGraph App'
+    description = 'Nodes that ask the running HouseGraph application for something only it can produce, starting with a picture of each component of the open graph.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.app.nodes']
+}
+
+// No dependencies, and nothing bundled. This library talks to the application hosting it through
+// ResourceRegistry, which comes from housegraph-api (compileOnly here) - see the package
+// documentation for why that lookup is typed with java.util.function.Function and java.util.Map
+// rather than an interface of this library's own.
