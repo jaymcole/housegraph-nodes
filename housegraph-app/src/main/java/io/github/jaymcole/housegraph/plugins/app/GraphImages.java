@@ -53,7 +53,7 @@ public final class GraphImages {
      */
     public static final String BASE_NAME_KEY = "baseName";
 
-    /** Reply key: the absolute path of each PNG written, in component order. */
+    /** Reply key: the absolute path of each PNG written, in the order HouseGraph numbered them. */
     public static final String FILES_KEY = "files";
 
     private GraphImages() {
@@ -67,8 +67,9 @@ public final class GraphImages {
      *                  is the caller's business
      * @param baseName  what to name the files, or null/blank to let HouseGraph name them after the
      *                  open graph
-     * @return one path per connected component, in the order HouseGraph drew them; empty when the
-     *         open graph has no nodes at all, which is not a failure
+     * @return one path per connected component, numbered by where it sits on the canvas — top to
+     *         bottom, then left to right; empty when the open graph has no nodes at all, which is
+     *         not a failure
      * @throws HostServiceException if this HouseGraph does not offer the service, if it could not
      *                              draw, or if it named a file that is not there afterwards
      */
