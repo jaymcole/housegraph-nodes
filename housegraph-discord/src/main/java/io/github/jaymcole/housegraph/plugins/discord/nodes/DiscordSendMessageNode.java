@@ -8,7 +8,12 @@ import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordAttachment;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordAttachments;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordImages;
+
+import java.util.List;
 
 /**
  * Posts a message to a Discord channel when triggered — the action side of the pattern.
@@ -26,6 +31,14 @@ import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
  * load. The plain pull is re-evaluated fresh on every {@code process()} call regardless. This is
  * safe now that {@code DiscordBotNode#connectBot} is idempotent — resolving Bot as a data
  * dependency no longer forces a reconnect as a side effect.
+ * <p>
+ * <b>Attachments</b> takes an image, a file path, or a list of either — it is typed to accept
+ * anything because a port typed for images could not take the list Graph Images emits, and one
+ * typed for lists could not take the single image a Camera Snapshot emits. A JavaFX image is
+ * uploaded as a PNG; a string or {@code Path} is read as a file on disk. Leave it unwired to send
+ * text alone. Discord caps one message at ten files, and anything that cannot be sent fails the
+ * node rather than posting a message that looks like it worked
+ * (see {@link io.github.jaymcole.housegraph.plugins.discord.DiscordAttachments}).
  */
 @Display.Name("Discord Send Message")
 @Node.Type("discord.DiscordSendMessageNode")
@@ -36,6 +49,7 @@ public class DiscordSendMessageNode extends BaseNode {
     private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 
@@ -56,7 +70,10 @@ public class DiscordSendMessageNode extends BaseNode {
             log.warn("Discord Send Message did nothing: Message is empty");
             return;
         }
-        bot.sendMessage(channelId, text);
+        // Read before anything is sent: a path with no file at it should fail the node, not post
+        // the message and then complain about the picture that was meant to go with it.
+        List<DiscordAttachment> files = DiscordAttachments.read(attachments.getValue(), DiscordImages.ENCODER);
+        bot.sendMessage(channelId, text, List.of(), files);
     }
 
     @Override
@@ -64,6 +81,7 @@ public class DiscordSendMessageNode extends BaseNode {
         addInput(botInput);
         addInput(message);
         addInput(channel);
+        addInput(attachments);
     }
 
     @Override

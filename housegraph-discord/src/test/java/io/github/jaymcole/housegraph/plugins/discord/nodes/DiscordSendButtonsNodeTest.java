@@ -88,10 +88,10 @@ class DiscordSendButtonsNodeTest {
     }
 
     @Test
-    void declaresBotMessageAndChannelInputsInOrder() {
+    void declaresBotMessageChannelAndAttachmentsInputsInOrder() {
         DiscordSendButtonsNode node = new DiscordSendButtonsNode();
 
-        assertEquals(List.of("Bot", "Message", "Channel"),
+        assertEquals(List.of("Bot", "Message", "Channel", "Attachments"),
                 node.getInputs().stream().map(v -> v.name).toList());
     }
 

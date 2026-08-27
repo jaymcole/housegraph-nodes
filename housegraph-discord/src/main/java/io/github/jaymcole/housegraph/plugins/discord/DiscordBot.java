@@ -182,6 +182,20 @@ public final class DiscordBot {
      * the button's id.
      */
     public void sendMessage(String channelId, String text, List<DiscordButtonSpec> buttons) {
+        sendMessage(channelId, text, buttons, List.of());
+    }
+
+    /**
+     * Posts {@code text} with {@code buttons} and {@code attachments}; a no-op if not connected
+     * or the channel isn't found.
+     * <p>
+     * The uploads are opened here and handed to JDA, which closes them once the request has been
+     * sent — including when it fails, which is why nothing below closes them itself. A file that
+     * cannot be opened at all fails before anything is sent, so a message never arrives claiming
+     * an attachment it does not have.
+     */
+    public void sendMessage(String channelId, String text, List<DiscordButtonSpec> buttons,
+                            List<DiscordAttachment> attachments) {
         DiscordGateway current = session();
         JDA jda = current == null ? null : current.jda();
         if (jda == null) {
@@ -195,6 +209,9 @@ public final class DiscordBot {
             return;
         }
         MessageCreateAction action = channel.sendMessage(text);
+        if (!attachments.isEmpty()) {
+            action = action.setFiles(DiscordUploads.open(attachments));
+        }
         if (!buttons.isEmpty()) {
             List<Button> jdaButtons = new ArrayList<>();
             for (DiscordButtonSpec button : buttons) {

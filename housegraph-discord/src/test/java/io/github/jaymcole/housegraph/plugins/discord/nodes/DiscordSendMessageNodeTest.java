@@ -19,10 +19,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class DiscordSendMessageNodeTest {
 
     @Test
-    void declaresBotMessageAndChannelInputsInOrder() {
+    void declaresBotMessageChannelAndAttachmentsInputsInOrder() {
         DiscordSendMessageNode node = new DiscordSendMessageNode();
 
-        assertEquals(List.of("Bot", "Message", "Channel"),
+        assertEquals(List.of("Bot", "Message", "Channel", "Attachments"),
                 node.getInputs().stream().map(v -> v.name).toList());
     }
 

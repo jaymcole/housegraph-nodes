@@ -330,7 +330,9 @@ final class DiscordGateway {
             boolean ephemeral = ephemeralByCommand.getOrDefault(event.getName(), false);
             event.deferReply(ephemeral).queue();
             InteractionHook hook = event.getHook();
-            DiscordReply reply = text -> hook.editOriginal(text).queue();
+            DiscordReply reply = (text, attachments) -> (attachments.isEmpty()
+                    ? hook.editOriginal(text)
+                    : hook.editOriginal(text).setFiles(DiscordUploads.open(attachments))).queue();
 
             Map<String, String> options = new HashMap<>();
             for (OptionMapping option : event.getOptions()) {
@@ -355,7 +357,9 @@ final class DiscordGateway {
             // button this session didn't send) defaults to ephemeral, the safer choice.
             event.deferReply(isButtonEphemeral(event.getComponentId())).queue();
             InteractionHook hook = event.getHook();
-            DiscordReply reply = text -> hook.editOriginal(text).queue();
+            DiscordReply reply = (text, attachments) -> (attachments.isEmpty()
+                    ? hook.editOriginal(text)
+                    : hook.editOriginal(text).setFiles(DiscordUploads.open(attachments))).queue();
 
             // Disable the clicked message's buttons so it can't be pressed again. A plain
             // message edit, independent of the interaction's own ack/reply above.
