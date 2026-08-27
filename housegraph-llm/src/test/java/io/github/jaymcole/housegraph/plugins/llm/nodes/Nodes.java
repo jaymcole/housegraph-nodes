@@ -49,6 +49,16 @@ final class Nodes {
         return node.getOutputs().stream().map(variable -> variable.name).toList();
     }
 
+    /** Every flow input's name, in port order. */
+    static List<String> flowInputNames(BaseNode node) {
+        return node.getFlowInputs().stream().map(port -> port.name).toList();
+    }
+
+    /** Every flow output's name, in port order. */
+    static List<String> flowOutputNames(BaseNode node) {
+        return node.getFlowOutputs().stream().map(port -> port.name).toList();
+    }
+
     private static NodeVariable<?> find(List<NodeVariable> variables, String name, BaseNode node, String kind) {
         return variables.stream()
                 .filter(variable -> variable.name.equals(name))

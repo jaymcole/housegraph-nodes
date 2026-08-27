@@ -18,7 +18,7 @@ they just share a build and a release.
 | `housegraph-collections` | **lists:** Split Text, Build List, Number Range, List Count, Get Item, List Contains, Index Of, Join List, Slice List, Reverse List, Sort List, Distinct, Concat Lists, Append Item, Remove Item, Flatten, Shuffle, Random Item, Filter by Text, Filter by Pattern, Filter by Number, Format Each, List Statistics, Collect Items<br>**maps:** Build Map, Map Get, Map Put, Map Remove, Map Entries, Map from Lists, Merge Maps, Join Map, Tally, Collect Entries<br>**sets:** To Set, Set to List, Set Contains, Set Add, Set Remove, Set Union, Set Intersection, Set Difference | nothing |
 | `housegraph-string` | Format Text, Join Text, Change Case, Trim Text, Replace Text, Substring, Truncate Text, Compare Text, Text Length, Regex Match, Regex Find All, Regex Replace, Parse Number, Parse Boolean | nothing |
 | `housegraph-store` | Stored Value | nothing |
-| `housegraph-llm` | Local LLM | nothing |
+| `housegraph-llm` | Local LLM Server, Pull Model, LLM Server Status, Local LLM | nothing |
 | `housegraph-database` | Database, Insert Row, Find Rows, Update Rows, Delete Rows, SQL Query, SQL Statement | sqlite-jdbc |
 | `housegraph-datetime` | Milliseconds To Date Time | nothing |
 | `housegraph-app` | Graph Images | nothing |

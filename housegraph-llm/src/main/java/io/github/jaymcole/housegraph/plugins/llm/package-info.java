@@ -1,8 +1,17 @@
 /**
- * Talking to a language model that is running on the same machine — the wire format, the URL
- * building and the error mapping — kept out of the
+ * Running a language model on the same machine, and talking to it — the process lifecycle, the wire
+ * format, the URL building and the error mapping — kept out of the
  * {@link io.github.jaymcole.housegraph.plugins.llm.nodes nodes} so all of it is testable as plain
  * functions against a stub HTTP server, with no graph and no JavaFX.
+ * <p>
+ * <b>The server is part of the library's job, not a prerequisite of it.</b>
+ * {@link io.github.jaymcole.housegraph.plugins.llm.LlmServerProcess} launches and supervises the
+ * server as a child process — {@code ollama serve}, {@code llama-server}, {@code vllm serve} —
+ * waits for its API to actually answer rather than merely for its port to open, and kills the tree
+ * on the way out (with {@code LlmServerRecord} on disk as the net under a JVM that never got to run
+ * its teardown). It adopts a server that is already
+ * running instead of colliding with it, which is what makes the node work on the many machines
+ * where Ollama is installed as a background service.
  * <p>
  * <b>Local means two protocols, not one.</b> Ollama has its own {@code /api/generate} shape;
  * llama.cpp's server, LM Studio, vLLM and text-generation-webui all speak OpenAI's
