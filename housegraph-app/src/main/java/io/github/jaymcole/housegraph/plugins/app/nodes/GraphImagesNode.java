@@ -30,8 +30,13 @@ import java.util.List;
  * <b>Components, not one big picture.</b> A save file usually holds several automations that share
  * a canvas but nothing else; HouseGraph splits on that and draws each alone, so a graph with a
  * doorbell flow and a nightly backup flow gives two images, not one with both and a gap between
- * them. The order is stable: a component's position in the list does not move because another one
- * was edited.
+ * them.
+ * <p>
+ * <b>The order follows the canvas, not the file.</b> Components arrive numbered by where they sit
+ * — top to bottom, then left to right — so the list matches how you would count them looking at
+ * the graph, and does not shuffle when a save reorders the nodes underneath. Drag one automation
+ * above another and they swap places, which is the trade for numbering that means something to
+ * someone reading the picture.
  * <p>
  * <b>Leave Folder empty and nothing is left behind.</b> The images are drawn into a temporary
  * folder, loaded, and the folder deleted — Images is then the only copy, which is what you want

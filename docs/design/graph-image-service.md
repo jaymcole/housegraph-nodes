@@ -58,7 +58,7 @@ user set one:
 
 | Key | Type | Meaning |
 | --- | --- | --- |
-| `files` | `List<String>` | Absolute path of each PNG written, **in component order**. Empty is a valid answer: a graph with no nodes has no components, and the node treats that as an empty list rather than a failure. |
+| `files` | `List<String>` | Absolute path of each PNG written, **in the order the application numbered them** — by canvas position, top to bottom then left to right. Empty is a valid answer: a graph with no nodes has no components, and the node treats that as an empty list rather than a failure. |
 | `error` | `String` | A sentence saying what went wrong, shown to the user as the reason. A blank value is not an error. |
 
 Anything else — a null reply, a reply that is not a `Map`, a `files` that is not a `List` — fails
