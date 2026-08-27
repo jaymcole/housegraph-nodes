@@ -6,8 +6,13 @@ import io.github.jaymcole.housegraph.graph.BaseNode;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordAttachment;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordAttachments;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordImages;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordWebhookClient;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordWebhookException;
+
+import java.util.List;
 
 /**
  * Posts a message to a Discord <a href="https://discord.com/developers/docs/resources/webhook">webhook</a>
@@ -28,6 +33,18 @@ import io.github.jaymcole.housegraph.plugins.discord.DiscordWebhookException;
  * A failure — an invalid or deleted webhook, an unreachable URL, a request Discord rejects —
  * fails the node rather than silently doing nothing, so it shows up on the canvas instead of
  * disappearing (see {@link DiscordWebhookClient}).
+ * <p>
+ * <b>Attachments</b> takes an image, a file path, or a list of either — it is typed to accept
+ * anything because a port typed for images could not take the list Graph Images emits, and one
+ * typed for lists could not take the single image a Camera Snapshot emits. A JavaFX image is
+ * uploaded as a PNG; a string or {@code Path} is read as a file on disk. Leave it unwired to send
+ * text alone. Discord caps one message at ten files, and anything that cannot be sent fails the
+ * node rather than posting a message that looks like it worked
+ * (see {@link io.github.jaymcole.housegraph.plugins.discord.DiscordAttachments}).
+ * <p>
+ * Attaching a file also changes how the post is made: with none it is one JSON request, and with
+ * any it becomes a {@code multipart/form-data} upload, which is the only shape Discord's webhook
+ * API accepts files in.
  */
 @Display.Name("Discord Send Webhook Message")
 @Node.Type("discord.DiscordSendWebhookMessageNode")
@@ -37,6 +54,7 @@ public class DiscordSendWebhookMessageNode extends BaseNode {
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
     private final NodeVariable<String> username = new NodeVariable<>("Username", String.class, true);
     private final NodeVariable<String> avatarUrl = new NodeVariable<>("Avatar URL", String.class, true);
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
     private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true);
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
@@ -51,8 +69,11 @@ public class DiscordSendWebhookMessageNode extends BaseNode {
         if (text == null || text.isBlank()) {
             throw new DiscordWebhookException("Message is empty.");
         }
+        // Read before the request is built: a path with no file at it should fail the node rather
+        // than post the message and lose the attachment it was about.
+        List<DiscordAttachment> files = DiscordAttachments.read(attachments.getValue(), DiscordImages.ENCODER);
         ctx.checkCancelled();
-        DiscordWebhookClient.send(url, text, username.getValue(), avatarUrl.getValue(), timeoutSeconds());
+        DiscordWebhookClient.send(url, text, username.getValue(), avatarUrl.getValue(), timeoutSeconds(), files);
     }
 
     /** The authored timeout, or the client's default when the field is empty. */
@@ -67,6 +88,7 @@ public class DiscordSendWebhookMessageNode extends BaseNode {
         addInput(message);
         addInput(username);
         addInput(avatarUrl);
+        addInput(attachments);
         addInput(timeout);
     }
 

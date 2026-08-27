@@ -1,5 +1,6 @@
 package io.github.jaymcole.housegraph.plugins.discord;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -11,6 +12,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * One POST to a Discord <a href="https://discord.com/developers/docs/resources/webhook">webhook</a>
@@ -50,6 +52,29 @@ public final class DiscordWebhookClient {
      *                                 the request times out
      */
     public static void send(String webhookUrl, String content, String username, String avatarUrl, int timeoutSeconds) {
+        send(webhookUrl, content, username, avatarUrl, timeoutSeconds, List.of());
+    }
+
+    /**
+     * Posts {@code content} to a Discord webhook, with {@code attachments} uploaded alongside it.
+     * <p>
+     * <b>Files change the wire format, not just the body.</b> With none, this is the one JSON POST
+     * above. With any, Discord requires {@code multipart/form-data} — the message becomes a
+     * {@code payload_json} part and each file a {@code files[n]} part — so the two shapes are
+     * built by {@link DiscordMultipart} and chosen between here.
+     *
+     * @param webhookUrl     the full webhook URL Discord issued
+     * @param content        the message text
+     * @param username       a per-message name override, or null/blank for the webhook's own
+     * @param avatarUrl      a per-message avatar override, or null/blank for the webhook's own
+     * @param timeoutSeconds how long to wait for Discord to answer; below 1 is clamped to 1
+     * @param attachments    files to upload; empty sends the plain JSON shape
+     * @throws DiscordWebhookException    if the URL can't be reached, Discord rejects the request,
+     *                                    or the request times out
+     * @throws DiscordAttachmentException if a file to upload cannot be read
+     */
+    public static void send(String webhookUrl, String content, String username, String avatarUrl,
+                            int timeoutSeconds, List<DiscordAttachment> attachments) {
         JSONObject body = new JSONObject();
         body.put("content", content);
         if (username != null && !username.isBlank()) {
@@ -57,6 +82,16 @@ public final class DiscordWebhookClient {
         }
         if (avatarUrl != null && !avatarUrl.isBlank()) {
             body.put("avatar_url", avatarUrl);
+        }
+        if (!attachments.isEmpty()) {
+            // Discord matches these ids to the files[n] parts, and uses the filename it finds here
+            // rather than the one on the part. Declaring them is what makes an upload show up named
+            // as intended instead of as "unknown".
+            JSONArray declared = new JSONArray();
+            for (int i = 0; i < attachments.size(); i++) {
+                declared.put(new JSONObject().put("id", i).put("filename", attachments.get(i).name()));
+            }
+            body.put("attachments", declared);
         }
 
         URI uri;
@@ -66,13 +101,18 @@ public final class DiscordWebhookClient {
             throw new DiscordWebhookException("The Webhook URL is not a valid URL.", e);
         }
 
-        HttpRequest request = HttpRequest.newBuilder(uri)
-                .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
-                .build();
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)));
+        if (attachments.isEmpty()) {
+            builder.header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8));
+        } else {
+            DiscordMultipart multipart = DiscordMultipart.of(body.toString(), attachments);
+            builder.header("Content-Type", multipart.contentType())
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(multipart.body()));
+        }
 
-        HttpResponse<String> response = send(request);
+        HttpResponse<String> response = send(builder.build());
         if (response.statusCode() / 100 != 2) {
             throw new DiscordWebhookException("Discord rejected the webhook message with HTTP "
                     + response.statusCode() + ": " + errorFrom(response.body()));

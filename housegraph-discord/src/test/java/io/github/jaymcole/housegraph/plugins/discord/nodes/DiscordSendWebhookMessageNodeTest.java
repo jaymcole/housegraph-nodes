@@ -35,7 +35,7 @@ class DiscordSendWebhookMessageNodeTest {
     void declaresWebhookUrlMessageUsernameAvatarAndTimeoutInputsInOrder() {
         DiscordSendWebhookMessageNode node = new DiscordSendWebhookMessageNode();
 
-        assertEquals(List.of("Webhook URL", "Message", "Username", "Avatar URL", "Timeout (s)"),
+        assertEquals(List.of("Webhook URL", "Message", "Username", "Avatar URL", "Attachments", "Timeout (s)"),
                 Nodes.inputNames(node));
     }
 

@@ -9,7 +9,10 @@ import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
 import io.github.jaymcole.housegraph.logging.Log;
 import io.github.jaymcole.housegraph.logging.Logger;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordAttachment;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordAttachments;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
+import io.github.jaymcole.housegraph.plugins.discord.DiscordImages;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordButtonClick;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordButtonSpec;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordReply;
@@ -76,6 +79,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
     private final NodeVariable<String> senderId = new NodeVariable<>("Sender ID", String.class);
     private final NodeVariable<String> senderName = new NodeVariable<>("Sender Name", String.class);
     private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue();
@@ -121,7 +125,10 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         for (String label : buttonLabels) {
             buttons.add(new DiscordButtonSpec(label, label));
         }
-        bot.sendMessage(channelId, text, buttons);
+        // Read before anything is sent, so a bad path fails the node instead of posting the
+        // buttons and losing the file they were about.
+        List<DiscordAttachment> files = DiscordAttachments.read(attachments.getValue(), DiscordImages.ENCODER);
+        bot.sendMessage(channelId, text, buttons, files);
         activate(sent); // explicit: with button branches also declared, the "activate nothing -> fire everything" default would fire those too
     }
 
@@ -130,6 +137,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         addInput(botInput);
         addInput(message);
         addInput(channel);
+        addInput(attachments);
     }
 
     @Override
