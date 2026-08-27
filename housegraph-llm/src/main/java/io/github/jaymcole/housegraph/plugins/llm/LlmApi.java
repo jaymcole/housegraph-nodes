@@ -6,12 +6,14 @@ import org.json.JSONObject;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
  * The two shapes a locally running LLM answers to, and everything that differs between them: the
- * path to POST to, the request body, and where in the reply the generated text is.
+ * path to POST to, the request body, where in the reply the generated text is, and how to ask the
+ * server which models it has.
  * <p>
  * <b>{@link #OLLAMA}</b> is Ollama's own {@code /api/generate}: model, prompt and an optional
  * system prompt as top-level fields, sampling settings under {@code options}, and the answer in
@@ -110,6 +112,93 @@ public enum LlmApi {
      * @throws LlmException if the server is blank or is not a usable address
      */
     public URI endpoint(String server) {
+        String base = baseUrl(server);
+        return uri(server, base + pathToAppend(base.toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * The URL to GET for the list of models this server has, and the readiness check that comes
+     * with it: {@code /api/tags} for Ollama, {@code /v1/models} for an OpenAI-compatible server.
+     * <p>
+     * <b>Both are cheap and neither loads a model</b>, which is what makes them the right way to
+     * ask "is the server up?" — a question the server nodes ask in a loop while one is starting.
+     * A TCP connect would be cheaper still and would answer the wrong question: a port comes up
+     * the instant the process binds it, seconds before the API behind it will answer anything, and
+     * a port bound by something else entirely answers just as readily.
+     * <p>
+     * <b>A Server that names the prompt endpoint is understood</b>, not appended to. People paste
+     * whatever address they already had working into the Server field, and for the
+     * {@link #endpoint} that is harmless — it is left alone. Here it would produce
+     * {@code /api/generate/api/tags}, so the prompt path is stripped back off first.
+     *
+     * @param server the authored server address
+     * @return the endpoint to GET the installed models from
+     * @throws LlmException if the server is blank or is not a usable address
+     */
+    public URI modelsEndpoint(String server) {
+        String root = root(server);
+        return uri(server, root + modelsPath(root.toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * The names of the models the server reports, out of a {@link #modelsEndpoint} reply — Ollama's
+     * {@code models[].name}, OpenAI's {@code data[].id}.
+     * <p>
+     * <b>A server with no models is not a failure</b> and gives an empty list: Ollama answers
+     * exactly that on a fresh install, and "running, nothing pulled yet" is a state a graph should
+     * be able to see and act on rather than an error. A reply <em>without</em> the field
+     * <b>throws</b>, for {@link #replyFrom}'s reason: it is something other than this API on that
+     * address, and saying so beats reporting "no models".
+     *
+     * @param responseBody the server's response body
+     * @return the model names, in the order the server listed them; never null
+     * @throws LlmException if the body is not this API's model-list shape
+     */
+    public List<String> modelsFrom(String responseBody) {
+        JSONObject json = parseObject(responseBody);
+        String field = this == OLLAMA ? "models" : "data";
+        String nameField = this == OLLAMA ? "name" : "id";
+        JSONArray entries = json.optJSONArray(field);
+        if (entries == null) {
+            throw new LlmException(missingField(field, responseBody));
+        }
+        List<String> names = new ArrayList<>(entries.length());
+        for (int index = 0; index < entries.length(); index++) {
+            JSONObject entry = entries.optJSONObject(index);
+            String name = entry == null ? null : entry.optString(nameField, null);
+            if (name != null && !name.isBlank()) {
+                names.add(name);
+            }
+        }
+        return List.copyOf(names);
+    }
+
+    /**
+     * The server's own address, with any endpoint path the user typed stripped back off, so
+     * another path can be hung on it. Package-private: {@link LlmModels} needs it to reach Ollama's
+     * {@code /api/pull}, and {@code LlmServerProcess} to work out what to export as
+     * {@code OLLAMA_HOST}; nothing outside this library should be building URLs by hand.
+     *
+     * @param server the authored server address
+     * @return the root URL, with a scheme and no trailing slash
+     * @throws LlmException if the server is blank or is not a usable address
+     */
+    String root(String server) {
+        String base = baseUrl(server);
+        String lower = base.toLowerCase(Locale.ROOT);
+        String suffix = this == OLLAMA ? "/api/generate" : "/chat/completions";
+        return lower.endsWith(suffix) ? base.substring(0, base.length() - suffix.length()) : base;
+    }
+
+    /**
+     * An authored address as a URL: a scheme (plain {@code http://} unless one was typed, since a
+     * local model server is almost never behind TLS) and no trailing slash.
+     *
+     * @param server the authored server address
+     * @return the normalised base URL
+     * @throws LlmException if the server is blank
+     */
+    private static String baseUrl(String server) {
         String base = server == null ? "" : server.trim();
         if (base.isEmpty()) {
             throw new LlmException("No LLM server address given (e.g. " + LocalLlmClient.DEFAULT_SERVER + ").");
@@ -121,7 +210,11 @@ public enum LlmApi {
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
-        String url = base + pathToAppend(base.toLowerCase(Locale.ROOT));
+        return base;
+    }
+
+    /** A built URL as a {@link URI}, blaming the address the user actually typed if it will not parse. */
+    private static URI uri(String server, String url) {
         try {
             return new URI(url);
         } catch (URISyntaxException e) {
@@ -138,6 +231,19 @@ public enum LlmApi {
                     yield "";
                 }
                 yield base.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions";
+            }
+        };
+    }
+
+    /** What to hang on an already-stripped root URL to make it this API's model list. */
+    private String modelsPath(String root) {
+        return switch (this) {
+            case OLLAMA -> root.endsWith("/api/tags") ? "" : "/api/tags";
+            case OPENAI -> {
+                if (root.endsWith("/models")) {
+                    yield "";
+                }
+                yield root.endsWith("/v1") ? "/models" : "/v1/models";
             }
         };
     }

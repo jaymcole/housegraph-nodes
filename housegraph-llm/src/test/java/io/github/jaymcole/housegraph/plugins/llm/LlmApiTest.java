@@ -3,6 +3,8 @@ package io.github.jaymcole.housegraph.plugins.llm;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -72,6 +74,57 @@ class LlmApiTest {
     @Test
     void noAddressFails() {
         assertThrows(LlmException.class, () -> LlmApi.OLLAMA.endpoint(" "));
+    }
+
+    @Test
+    void eachApiListsItsModelsSomewhereElse() {
+        assertEquals("http://localhost:11434/api/tags",
+                LlmApi.OLLAMA.modelsEndpoint("http://localhost:11434").toString());
+        assertEquals("http://localhost:1234/v1/models",
+                LlmApi.OPENAI.modelsEndpoint("http://localhost:1234").toString());
+        assertEquals("http://localhost:1234/v1/models",
+                LlmApi.OPENAI.modelsEndpoint("http://localhost:1234/v1").toString());
+    }
+
+    @Test
+    void aServerThatNamesThePromptEndpointStillHasAModelList() {
+        // Someone pastes the address they already had working into Server. Appending to it would
+        // give /api/generate/api/tags, which is a 404 and reads as "the server is down".
+        assertEquals("http://localhost:11434/api/tags",
+                LlmApi.OLLAMA.modelsEndpoint("http://localhost:11434/api/generate").toString());
+        assertEquals("http://localhost:1234/v1/models",
+                LlmApi.OPENAI.modelsEndpoint("http://localhost:1234/v1/chat/completions").toString());
+    }
+
+    @Test
+    void anAddressThatAlreadyNamesTheModelListIsLeftAlone() {
+        assertEquals("http://localhost:11434/api/tags",
+                LlmApi.OLLAMA.modelsEndpoint("http://localhost:11434/api/tags").toString());
+        assertEquals("http://localhost:1234/v1/models",
+                LlmApi.OPENAI.modelsEndpoint("http://localhost:1234/v1/models").toString());
+    }
+
+    @Test
+    void theModelsAreReadFromWhereEachApiPutsThem() {
+        assertEquals(List.of("llama3.2:latest", "qwen2.5:7b"), LlmApi.OLLAMA.modelsFrom(
+                "{\"models\":[{\"name\":\"llama3.2:latest\",\"size\":1},{\"name\":\"qwen2.5:7b\"}]}"));
+        assertEquals(List.of("local-model"), LlmApi.OPENAI.modelsFrom(
+                "{\"object\":\"list\",\"data\":[{\"id\":\"local-model\",\"object\":\"model\"}]}"));
+    }
+
+    @Test
+    void aServerWithNothingPulledIsRunningWithNoModels() {
+        assertEquals(List.of(), LlmApi.OLLAMA.modelsFrom("{\"models\":[]}"));
+        assertEquals(List.of(), LlmApi.OPENAI.modelsFrom("{\"data\":[]}"));
+    }
+
+    @Test
+    void aModelListInTheOtherApisShapeIsAFailureNotAnEmptyList() {
+        LlmException failure = assertThrows(LlmException.class,
+                () -> LlmApi.OLLAMA.modelsFrom("{\"data\":[{\"id\":\"local-model\"}]}"));
+        assertTrue(failure.getMessage().contains("API setting"), failure.getMessage());
+        assertThrows(LlmException.class, () -> LlmApi.OPENAI.modelsFrom("{\"models\":[]}"));
+        assertThrows(LlmException.class, () -> LlmApi.OLLAMA.modelsFrom("<html>nope</html>"));
     }
 
     @Test

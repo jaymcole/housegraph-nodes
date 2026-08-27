@@ -5,7 +5,7 @@ plugins {
 nodeLibrary {
     id = 'housegraph-llm'
     libraryName = 'Local LLM'
-    description = 'Prompts a language model running on this machine (Ollama, or any OpenAI-compatible server) and returns its reply as text.'
+    description = 'Runs a language model on this machine - starts the server (Ollama, or any OpenAI-compatible one), pulls a model, and prompts it.'
     nodePackages = ['io.github.jaymcole.housegraph.plugins.llm.nodes']
 }
 
