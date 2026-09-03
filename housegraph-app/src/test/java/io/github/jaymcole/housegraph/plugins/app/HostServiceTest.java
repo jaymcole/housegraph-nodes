@@ -103,9 +103,12 @@ class HostServiceTest {
         // Erasure means a service can hand back Paths, or a mix, without the compiler noticing on
         // either side. The useful failure is a missing key, not element three being the wrong type.
         stub = StubService.answering(NAME, StubService.reply());
+        // Expected via toString() rather than as a literal: what a Path renders as is the platform's
+        // business (it is "\tmp\a.png" on Windows), and what's under test is that it was rendered.
+        Path path = Path.of("/tmp/a.png");
 
-        assertEquals(List.of("/tmp/a.png", "7"),
-                call().stringsOf(Map.of("files", Arrays.asList(Path.of("/tmp/a.png"), 7)), "files"));
+        assertEquals(List.of(path.toString(), "7"),
+                call().stringsOf(Map.of("files", Arrays.asList(path, 7)), "files"));
     }
 
     @Test
