@@ -236,6 +236,21 @@ final class DiscordGateway {
         return true;
     }
 
+    /**
+     * Whether a click on {@code buttonId} disables the clicked message's buttons: the preference of
+     * the first joined bot that declared one, or the default (disable) when none did — what a click
+     * did unconditionally before the preference existed.
+     */
+    boolean isButtonDisableOnClick(String buttonId) {
+        for (DiscordBot member : members) {
+            Boolean preference = member.buttonDisableOnClickPreference(buttonId);
+            if (preference != null) {
+                return preference;
+            }
+        }
+        return true;
+    }
+
     private static void addUnlessNamed(List<SlashCommandSpec> specs, SlashCommandSpec candidate) {
         for (SlashCommandSpec existing : specs) {
             if (existing.name().equalsIgnoreCase(candidate.name())) {
@@ -361,10 +376,15 @@ final class DiscordGateway {
                     ? hook.editOriginal(text)
                     : hook.editOriginal(text).setFiles(DiscordUploads.open(attachments))).queue();
 
-            // Disable the clicked message's buttons so it can't be pressed again. A plain
-            // message edit, independent of the interaction's own ack/reply above.
-            List<Button> disabled = event.getMessage().getButtons().stream().map(Button::asDisabled).toList();
-            event.getMessage().editMessageComponents(ActionRow.partitionOf(disabled)).queue();
+            // Disable the clicked message's buttons so it can't be pressed again — unless whichever
+            // joined bot declared this button id opted out (see DiscordBot#setButtonDisableOnClick),
+            // as a node enforcing its own per-person click budget does: the buttons have to stay
+            // live for everyone else. A plain message edit, independent of the interaction's own
+            // ack/reply above.
+            if (isButtonDisableOnClick(event.getComponentId())) {
+                List<Button> disabled = event.getMessage().getButtons().stream().map(Button::asDisabled).toList();
+                event.getMessage().editMessageComponents(ActionRow.partitionOf(disabled)).queue();
+            }
 
             DiscordButtonClick click = new DiscordButtonClick(
                     event.getComponentId(),

@@ -19,6 +19,7 @@ import io.github.jaymcole.housegraph.plugins.discord.DiscordReply;
 import io.github.jaymcole.housegraph.resource.Subscription;
 import io.github.jaymcole.housegraph.sdk.NodeContentProvider;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.VBox;
@@ -28,6 +29,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Posts a message with configurable buttons to a Discord channel when triggered, and fires a
@@ -60,8 +62,26 @@ import java.util.Map;
  * else. Belt and suspenders: the eager path is the one a click needs, the pull is the one that
  * can't be stale.
  * <p>
- * A click's message has its buttons disabled so they can't be pressed again — handled in
- * {@link DiscordBot}'s button-interaction listener. That listener also decides, per button id,
+ * A click's message has its buttons disabled so they can't be pressed again — handled by the
+ * gateway session behind {@link DiscordBot}, and switchable off per button id via
+ * {@link DiscordBot#setButtonDisableOnClick} by clearing this node's "Disable after first
+ * click". Cleared, the message stays pressable — by the same person again, and by everyone
+ * else — which is what makes "Max clicks per person" possible: Discord has no per-viewer
+ * component state (the buttons are part of the one shared message, so disabling them disables
+ * them for everybody), so a per-person budget can only be enforced here, by counting. This
+ * node keeps a click count per Discord user id and, once someone is over their budget, fires
+ * its {@code Exceeded} flow-out instead of the clicked button's own — with that click's
+ * sender/reply seeded the same way, so the branch can tell them they're done. The port only
+ * exists while a limit is configured. Two consequences worth knowing: the count is per person
+ * across <em>all</em> of this node's buttons (a 1-click budget on a {@code Yes, No} pair means
+ * one answer, not one of each), and it's in-memory and reset on every send — a fresh message
+ * starts a fresh round, and a host restart forgets who clicked.
+ * <p>
+ * Leaving "Disable after first click" on while a per-person limit is set is contradictory —
+ * the first click by anyone disables the buttons for everyone, so nobody reaches their second.
+ * The node logs a warning rather than silently picking one.
+ * <p>
+ * That same listener also decides, per button id,
  * whether to defer the click ephemerally (visible only to the clicker) via
  * {@link DiscordBot#setButtonEphemeral}: this node declares that preference — ephemeral unless
  * {@code Reply} has an outgoing edge — every time it matters (bot wired, labels changed, or
@@ -76,6 +96,9 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
 
     private static final Logger log = Log.get(DiscordSendButtonsNode.class);
 
+    /** Name of the flow-out fired instead of a button's own when the clicker is over their budget. */
+    private static final String EXCEEDED_PORT = "Exceeded";
+
     private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
@@ -87,12 +110,18 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     private final FlowPort sent = new FlowPort("", FlowPort.Direction.OUT);
     private final Map<String, FlowPort> buttonOutputs = new LinkedHashMap<>();
     private final List<String> buttonLabels = new ArrayList<>();
+    /** Discord user id -> clicks taken on this node's buttons since the last send; see the class doc. */
+    private final Map<String, Integer> clicksByUser = new ConcurrentHashMap<>();
 
     private DiscordBot bot;
     private Subscription subscription;
     private boolean replyWired;
     private DiscordBot declaredBot;
     private List<String> declaredLabels = new ArrayList<>();
+    private boolean disableAfterFirstClick = true;
+    private int maxClicksPerPerson;
+    /** The {@code Exceeded} port while one is declared (a limit is set), else null. Rebuilt in {@link #configureFlowOutputs}. */
+    private FlowPort exceededOutput;
 
     @Override
     public void process(ProcessContext ctx) {
@@ -129,6 +158,9 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         // buttons and losing the file they were about.
         List<DiscordAttachment> files = DiscordAttachments.read(attachments.getValue(), DiscordImages.ENCODER);
         bot.sendMessage(channelId, text, buttons, files);
+        // A new message is a new round: whoever used up their clicks on the last one gets
+        // their budget back. Only on an actual send, so a bail-out above leaves the counts alone.
+        clicksByUser.clear();
         activate(sent); // explicit: with button branches also declared, the "activate nothing -> fire everything" default would fire those too
     }
 
@@ -161,12 +193,28 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
             buttonOutputs.put(label, port);
             addFlowOutput(port);
         }
+        // Last, after the buttons, so adding or removing a limit doesn't shuffle their order.
+        exceededOutput = null;
+        if (maxClicksPerPerson > 0) {
+            if (buttonOutputs.containsKey(EXCEEDED_PORT)) {
+                // A button labelled "Exceeded" already owns that port name. Two flow-outs with
+                // one name would make saved edges reconnect to whichever came first, so skip
+                // the limit's port rather than build an ambiguous node.
+                log.warn("Discord Send Buttons has no \"{}\" flow-out for its per-person limit: "
+                        + "a button of that name already claims it — rename that button", EXCEEDED_PORT);
+            } else {
+                exceededOutput = new FlowPort(EXCEEDED_PORT, FlowPort.Direction.OUT);
+                addFlowOutput(exceededOutput);
+            }
+        }
     }
 
     @Override
     public Map<String, String> saveState() {
         Map<String, String> state = new HashMap<>();
         state.put("buttonLabels", String.join(",", buttonLabels));
+        state.put("disableAfterFirstClick", Boolean.toString(disableAfterFirstClick));
+        state.put("maxClicksPerPerson", Integer.toString(maxClicksPerPerson));
         return state;
     }
 
@@ -174,6 +222,11 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     public void loadState(Map<String, String> state) {
         buttonLabels.clear();
         buttonLabels.addAll(parseLabels(state.get("buttonLabels")));
+        // Absent means a graph saved before the option existed, when disabling was
+        // unconditional — so absent has to mean true, not parseBoolean(null)'s false.
+        String savedDisable = state.get("disableAfterFirstClick");
+        disableAfterFirstClick = savedDisable == null || Boolean.parseBoolean(savedDisable);
+        maxClicksPerPerson = parseMaxClicks(state.get("maxClicksPerPerson"), 0);
     }
 
     @Override
@@ -199,7 +252,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     protected void onOutputEdgeAdded(Edge edge) {
         if (edge.getSourceVariable() == reply) {
             replyWired = true;
-            redeclareEphemeral();
+            redeclareButtonPreferences();
         }
     }
 
@@ -207,7 +260,7 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     protected void onOutputEdgeRemoved(Edge edge) {
         if (edge.getSourceVariable() == reply) {
             replyWired = hasOutgoingReplyEdge();
-            redeclareEphemeral();
+            redeclareButtonPreferences();
         }
     }
 
@@ -231,18 +284,20 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         if (bot != null) {
             subscription = bot.addButtonListener(this::onClick);
         }
-        redeclareEphemeral();
+        redeclareButtonPreferences();
     }
 
     /**
-     * (Re)declares this node's ephemeral preference for its currently configured button labels
+     * (Re)declares this node's per-button preferences — ephemeral-vs-public replies, and
+     * whether a click disables the message — for its currently configured button labels
      * against the currently wired bot, withdrawing whatever was previously declared first (bot
      * and/or labels may have changed since).
      */
-    private void redeclareEphemeral() {
+    private void redeclareButtonPreferences() {
         if (declaredBot != null) {
             for (String label : declaredLabels) {
                 declaredBot.clearButtonEphemeral(label);
+                declaredBot.clearButtonDisableOnClick(label);
             }
         }
         declaredBot = bot;
@@ -251,18 +306,56 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
             boolean ephemeral = !replyWired;
             for (String label : buttonLabels) {
                 bot.setButtonEphemeral(label, ephemeral);
+                bot.setButtonDisableOnClick(label, disableAfterFirstClick);
             }
+        }
+        if (disableAfterFirstClick && maxClicksPerPerson > 0) {
+            log.warn("Discord Send Buttons has both \"Disable after first click\" and a per-person "
+                    + "limit of {} set: the first click by anyone disables the buttons for everyone, "
+                    + "so nobody gets a second click. Clear one of the two.", maxClicksPerPerson);
         }
     }
 
-    private void onClick(DiscordButtonClick click) {
-        FlowPort port = buttonOutputs.get(click.buttonId());
+    /**
+     * Decides which flow-out a click should fire: the clicked button's own, the
+     * {@code Exceeded} port if the clicker has used up their per-person budget, or null to
+     * ignore the click (a button this node doesn't have) — counting the click on the way,
+     * which is why this is called exactly once per click. Separate from {@link #onClick} so the
+     * routing can be tested without a live gateway to click on.
+     */
+    FlowPort routeClick(String buttonId, String userId) {
+        FlowPort port = buttonOutputs.get(buttonId);
         if (port == null) {
             log.debug("Discord Send Buttons ignored a click on \"{}\": not one of this node's configured buttons {}",
-                    click.buttonId(), buttonLabels);
-            return;
+                    buttonId, buttonLabels);
+            return null;
         }
-        log.info("Discord Send Buttons firing \"{}\" branch for a click from \"{}\"", click.buttonId(), click.authorName());
+        // merge() is atomic, so two near-simultaneous clicks from one person can't both read
+        // the same count and both slip past the last slot. The count keeps climbing past the
+        // limit for a persistent clicker; only whether it's over the line matters.
+        int used = clicksByUser.merge(userId, 1, Integer::sum);
+        int limit = maxClicksPerPerson;
+        if (limit > 0 && used > limit) {
+            if (exceededOutput == null) {
+                log.debug("Discord Send Buttons dropped a click on \"{}\": over the per-person limit of {} "
+                        + "with no \"{}\" flow-out to fire", buttonId, limit, EXCEEDED_PORT);
+            } else {
+                log.info("Discord Send Buttons firing \"{}\" branch: click {} on \"{}\" is over the per-person limit of {}",
+                        EXCEEDED_PORT, used, buttonId, limit);
+            }
+            return exceededOutput;
+        }
+        return port;
+    }
+
+    private void onClick(DiscordButtonClick click) {
+        FlowPort port = routeClick(click.buttonId(), click.authorId());
+        if (port == null) {
+            return; // routeClick logged why
+        }
+        if (port != exceededOutput) {
+            log.info("Discord Send Buttons firing \"{}\" branch for a click from \"{}\"", click.buttonId(), click.authorName());
+        }
         // runFlowBranchToCompletion blocks until the whole downstream branch finishes, so run
         // it off its own thread rather than tying up the JDA gateway thread the click arrived
         // on. The seed sets this specific click's sender/reply directly on the output
@@ -288,24 +381,62 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
         TextField labelsField = new TextField(String.join(", ", buttonLabels));
         labelsField.setPromptText("Yes, No");
 
-        Button applyButton = new Button("Apply");
-        applyButton.setOnAction(e -> applyLabels(labelsField.getText()));
-
         Label labelsLabel = new Label("Buttons");
         labelsLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
 
-        return new VBox(4, labelsLabel, labelsField, applyButton);
+        // The checkbox changes nothing about this node's shape, so it applies as you click it.
+        // The limit does (it grows the Exceeded port), so it waits for Apply along with the
+        // labels — one rebuild instead of one per keystroke.
+        CheckBox disableBox = new CheckBox("Disable after first click");
+        disableBox.setStyle("-fx-text-fill: #dddddd; -fx-font-size: 11px;");
+        disableBox.setSelected(disableAfterFirstClick);
+        disableBox.selectedProperty().addListener((obs, was, now) -> {
+            disableAfterFirstClick = now;
+            redeclareButtonPreferences();
+        });
+
+        Label maxLabel = new Label("Max clicks per person (0 = unlimited)");
+        maxLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
+        TextField maxField = new TextField(Integer.toString(maxClicksPerPerson));
+        maxField.setPromptText("0");
+
+        Button applyButton = new Button("Apply");
+        applyButton.setOnAction(e -> applyEdits(labelsField.getText(), maxField.getText()));
+
+        // wrapText handles the line breaks, so no embedded newlines to keep in sync.
+        Label hint = new Label("A limit needs the buttons left pressable, so clear "
+                + "\"Disable after first click\" to use it. Counts are per person across all of "
+                + "this node's buttons, and reset on every send.");
+        hint.setWrapText(true);
+        hint.setStyle("-fx-text-fill: #888888; -fx-font-size: 9px;");
+
+        return new VBox(4, labelsLabel, labelsField, disableBox, maxLabel, maxField, applyButton, hint);
     }
 
-    private void applyLabels(String text) {
-        List<String> edited = parseLabels(text);
-        if (edited.equals(buttonLabels)) {
+    private void applyEdits(String labelsText, String maxClicksText) {
+        List<String> editedLabels = parseLabels(labelsText);
+        int editedMax = parseMaxClicks(maxClicksText, maxClicksPerPerson);
+        if (editedLabels.equals(buttonLabels) && editedMax == maxClicksPerPerson) {
             return; // no change - avoid a needless rebuild
         }
         buttonLabels.clear();
-        buttonLabels.addAll(edited);
+        buttonLabels.addAll(editedLabels);
+        maxClicksPerPerson = editedMax;
         rebuildPorts();
-        redeclareEphemeral();
+        redeclareButtonPreferences();
+    }
+
+    /** Parses a click limit, falling back to {@code fallback} for anything that isn't a number. Negatives mean unlimited. */
+    private static int parseMaxClicks(String text, int fallback) {
+        if (text == null || text.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(text.trim()));
+        } catch (NumberFormatException e) {
+            log.warn("Discord Send Buttons ignored \"{}\" as a max-clicks-per-person value: not a number", text);
+            return fallback;
+        }
     }
 
     private static List<String> parseLabels(String text) {

@@ -32,7 +32,9 @@ import java.util.function.Consumer;
  *       has time (~15 min) to answer through the {@link DiscordReply} handle.</li>
  *   <li>{@link #sendMessage} posts to a channel by id, optionally with buttons attached;
  *       clicks on those buttons are delivered to every {@link #addButtonListener listener},
- *       deferred the same way as slash commands so a slow graph still gets to answer.</li>
+ *       deferred the same way as slash commands so a slow graph still gets to answer. A click
+ *       also disables the message's buttons unless {@link #setButtonDisableOnClick} says
+ *       otherwise for that button id.</li>
  * </ul>
  * Reading message content needs the privileged <b>MESSAGE_CONTENT</b> intent enabled for
  * the bot in Discord's developer portal; slash commands need no special intent.
@@ -60,6 +62,13 @@ public final class DiscordBot {
      * when nothing declared a preference.
      */
     private final Map<String, Boolean> ephemeralByButton = new ConcurrentHashMap<>();
+    /**
+     * Button id -> whether a click on it should disable the clicked message's buttons, as declared
+     * through this handle. Consulted the same per-session way as {@link #ephemeralByButton}. An id
+     * no handle has declared defaults to disabling, which is what a click did unconditionally
+     * before the preference existed.
+     */
+    private final Map<String, Boolean> disableOnClickByButton = new ConcurrentHashMap<>();
     /** What {@link #syncCommands} was last asked to register for this handle; unioned per session. */
     private volatile List<SlashCommandSpec> declaredCommands = List.of();
     private final CopyOnWriteArrayList<Consumer<DiscordMessage>> messageListeners = new CopyOnWriteArrayList<>();
@@ -143,6 +152,36 @@ public final class DiscordBot {
             return current.isButtonEphemeral(buttonId);
         }
         Boolean preference = ephemeralByButton.get(buttonId);
+        return preference == null || preference;
+    }
+
+    /**
+     * Declares whether a click on {@code buttonId} should disable the clicked message's buttons;
+     * consulted on every click. Turning this off leaves the message pressable — by the same
+     * person again, and by everyone else — so whoever declared it is responsible for deciding
+     * what a repeat click means.
+     */
+    public void setButtonDisableOnClick(String buttonId, boolean disable) {
+        disableOnClickByButton.put(buttonId, disable);
+    }
+
+    /** Withdraws a previously declared disable-on-click preference for {@code buttonId}, reverting it to the default (disable). */
+    public void clearButtonDisableOnClick(String buttonId) {
+        disableOnClickByButton.remove(buttonId);
+    }
+
+    /**
+     * Whether a click on {@code buttonId} would currently disable the message's buttons — the same
+     * lookup {@link #setButtonDisableOnClick} feeds. While connected this is the session's answer,
+     * which takes every handle sharing it into account, since that is what actually happens on a
+     * click.
+     */
+    public boolean isButtonDisableOnClick(String buttonId) {
+        DiscordGateway current = session();
+        if (current != null) {
+            return current.isButtonDisableOnClick(buttonId);
+        }
+        Boolean preference = disableOnClickByButton.get(buttonId);
         return preference == null || preference;
     }
 
@@ -239,6 +278,11 @@ public final class DiscordBot {
     /** This handle's ephemeral preference for {@code buttonId}, or null if it declared none. */
     Boolean buttonPreference(String buttonId) {
         return ephemeralByButton.get(buttonId);
+    }
+
+    /** This handle's disable-on-click preference for {@code buttonId}, or null if it declared none. */
+    Boolean buttonDisableOnClickPreference(String buttonId) {
+        return disableOnClickByButton.get(buttonId);
     }
 
     /** Called by a session as it admits this handle. */

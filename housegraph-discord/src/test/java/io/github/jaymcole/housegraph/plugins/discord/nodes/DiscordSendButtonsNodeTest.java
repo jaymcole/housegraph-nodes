@@ -2,6 +2,7 @@ package io.github.jaymcole.housegraph.plugins.discord.nodes;
 
 import io.github.jaymcole.housegraph.graph.BaseNode;
 import io.github.jaymcole.housegraph.graph.Edge;
+import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeGraph;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
@@ -85,6 +86,23 @@ class DiscordSendButtonsNodeTest {
                 .filter(v -> v.name.equals(name))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("No output named \"" + name + "\""));
+    }
+
+    private static FlowPort flowOutputNamed(BaseNode node, String name) {
+        return node.getFlowOutputs().stream()
+                .filter(p -> p.name.equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No flow output named \"" + name + "\""));
+    }
+
+    /** A node with the given buttons and per-person click limit, ports built. */
+    private static DiscordSendButtonsNode nodeWith(String labels, int maxClicksPerPerson) {
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", labels,
+                "maxClicksPerPerson", Integer.toString(maxClicksPerPerson),
+                "disableAfterFirstClick", "false")); // a limit needs the buttons left pressable
+        node.reconfigure();
+        return node;
     }
 
     @Test
@@ -285,5 +303,232 @@ class DiscordSendButtonsNodeTest {
 
         assertTrue(bot.isButtonEphemeral("Yes"),
                 "unwiring the bot should withdraw this node's declarations from it, not leave them stale");
+    }
+
+    // --- "Disable after first click" ----------------------------------------
+
+    @Test
+    void itsButtonsDisableTheMessageOnClickByDefault() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes"));
+        node.reconfigure();
+        graph.addNode(source);
+        graph.addNode(node);
+
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+
+        assertTrue(bot.isButtonDisableOnClick("Yes"),
+                "a node that has never been told otherwise should keep the old unconditional behavior");
+    }
+
+    @Test
+    void stateSavedBeforeTheOptionExistedStillDisablesOnClick() {
+        // Regression guard: the key is absent from every graph saved before this option existed,
+        // and parseBoolean(null) is false — which would silently flip those graphs' behavior.
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+        node.loadState(Map.of("buttonLabels", "Yes")); // no "disableAfterFirstClick" key at all
+        node.reconfigure();
+        graph.addNode(source);
+        graph.addNode(node);
+
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+
+        assertTrue(bot.isButtonDisableOnClick("Yes"));
+    }
+
+    @Test
+    void clearingTheOptionLeavesItsButtonsPressable() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = nodeWith("Yes,No", 0);
+        graph.addNode(source);
+        graph.addNode(node);
+
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+
+        assertFalse(bot.isButtonDisableOnClick("Yes"));
+        assertFalse(bot.isButtonDisableOnClick("No"));
+    }
+
+    @Test
+    void unwiringTheBotWithdrawsItsDisableOnClickDeclarations() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot();
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = nodeWith("Yes", 0);
+        graph.addNode(source);
+        graph.addNode(node);
+        Edge botEdge = new Edge(source, source.out, node, inputNamed(node, "Bot"));
+        graph.registerEdge(botEdge);
+        assertFalse(bot.isButtonDisableOnClick("Yes"), "sanity check: wired, so declared");
+
+        graph.removeEdge(botEdge);
+
+        assertTrue(bot.isButtonDisableOnClick("Yes"),
+                "unwiring should withdraw the declaration, not leave the bot honoring a gone node's preference");
+    }
+
+    @Test
+    void bothOptionsSurviveASaveLoadRoundTrip() {
+        DiscordSendButtonsNode saved = nodeWith("Yes,No", 3);
+        DiscordSendButtonsNode loaded = new DiscordSendButtonsNode();
+
+        loaded.loadState(saved.saveState());
+        loaded.reconfigure();
+
+        assertEquals(List.of("", "Yes", "No", "Exceeded"),
+                loaded.getFlowOutputs().stream().map(p -> p.name).toList());
+        loaded.routeClick("Yes", "u1");
+        loaded.routeClick("Yes", "u1");
+        assertSame(flowOutputNamed(loaded, "Yes"), loaded.routeClick("Yes", "u1"),
+                "the third of a 3-click budget should still be the button's own branch");
+        assertSame(flowOutputNamed(loaded, "Exceeded"), loaded.routeClick("Yes", "u1"),
+                "a 3-click budget should have been round-tripped, not reset to unlimited");
+    }
+
+    // --- "Max clicks per person" --------------------------------------------
+
+    @Test
+    void aPerPersonLimitGrowsAnExceededFlowOutputAfterTheButtons() {
+        DiscordSendButtonsNode node = nodeWith("Yes,No", 1);
+
+        assertEquals(List.of("", "Yes", "No", "Exceeded"),
+                node.getFlowOutputs().stream().map(p -> p.name).toList());
+    }
+
+    @Test
+    void withNoLimitThereIsNoExceededFlowOutput() {
+        DiscordSendButtonsNode node = nodeWith("Yes,No", 0);
+
+        assertEquals(List.of("", "Yes", "No"),
+                node.getFlowOutputs().stream().map(p -> p.name).toList());
+    }
+
+    @Test
+    void clicksWithinTheBudgetRouteToTheClickedButton() {
+        DiscordSendButtonsNode node = nodeWith("Yes,No", 2);
+
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"));
+        assertSame(flowOutputNamed(node, "No"), node.routeClick("No", "u1"));
+    }
+
+    @Test
+    void theClickAfterTheBudgetRoutesToExceeded() {
+        DiscordSendButtonsNode node = nodeWith("Yes", 1);
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"));
+
+        assertSame(flowOutputNamed(node, "Exceeded"), node.routeClick("Yes", "u1"));
+        assertSame(flowOutputNamed(node, "Exceeded"), node.routeClick("Yes", "u1"),
+                "and stays there — going further over doesn't wrap around");
+    }
+
+    @Test
+    void oneOverspenderDoesNotUseUpAnybodyElsesBudget() {
+        DiscordSendButtonsNode node = nodeWith("Yes", 1);
+        node.routeClick("Yes", "u1");
+        node.routeClick("Yes", "u1");
+
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u2"),
+                "the budget is per person, so u2 still has their click");
+    }
+
+    @Test
+    void theBudgetIsSharedAcrossAllOfThisNodesButtons() {
+        // A one-click budget on a Yes/No pair means one answer, not one of each.
+        DiscordSendButtonsNode node = nodeWith("Yes,No", 1);
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"));
+
+        assertSame(flowOutputNamed(node, "Exceeded"), node.routeClick("No", "u1"));
+    }
+
+    @Test
+    void withNoLimitEveryClickRoutesToItsOwnButton() {
+        DiscordSendButtonsNode node = nodeWith("Yes", 0);
+
+        for (int i = 0; i < 5; i++) {
+            assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"),
+                    "0 means unlimited, so nothing should ever be over budget");
+        }
+    }
+
+    @Test
+    void aClickOnAButtonThisNodeDoesNotHaveRoutesNowhere() {
+        DiscordSendButtonsNode node = nodeWith("Yes", 1);
+
+        assertNull(node.routeClick("Maybe", "u1"));
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"),
+                "and an ignored click shouldn't have spent anyone's budget");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sendingAgainGivesEveryoneTheirBudgetBack() {
+        NodeGraph graph = new NodeGraph();
+        DiscordBot bot = new DiscordBot(); // unconnected: sendMessage() on it is a safe no-op
+        BotSource source = new BotSource(bot);
+        DiscordSendButtonsNode node = nodeWith("Yes", 1);
+        graph.addNode(source);
+        graph.addNode(node);
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+        ((NodeVariable<String>) inputNamed(node, "Message")).setValue("hello");
+        ((NodeVariable<String>) inputNamed(node, "Channel")).setValue("123");
+        node.routeClick("Yes", "u1");
+        assertSame(flowOutputNamed(node, "Exceeded"), node.routeClick("Yes", "u1"), "sanity check: spent");
+
+        node.process(ProcessContext.uncancelled());
+
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"),
+                "a new message is a new round");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aSendThatDidNothingLeavesTheBudgetsAlone() {
+        NodeGraph graph = new NodeGraph();
+        BotSource source = new BotSource(new DiscordBot());
+        DiscordSendButtonsNode node = nodeWith("Yes", 1);
+        graph.addNode(source);
+        graph.addNode(node);
+        graph.registerEdge(new Edge(source, source.out, node, inputNamed(node, "Bot")));
+        ((NodeVariable<String>) inputNamed(node, "Message")).setValue("hello");
+        // Channel left empty, so process() bails out before sending anything.
+        node.routeClick("Yes", "u1");
+
+        node.process(ProcessContext.uncancelled());
+
+        assertSame(flowOutputNamed(node, "Exceeded"), node.routeClick("Yes", "u1"),
+                "nothing was posted, so there's no new round to hand budgets back for");
+    }
+
+    @Test
+    void aButtonNamedExceededKeepsItsOwnPortAndSuppressesTheLimitsOne() {
+        // Two flow-outs with one name would make saved edges reconnect to whichever came
+        // first, so the button keeps the name and the limit goes without a port.
+        DiscordSendButtonsNode node = nodeWith("Yes,Exceeded", 1);
+
+        assertEquals(List.of("", "Yes", "Exceeded"),
+                node.getFlowOutputs().stream().map(p -> p.name).toList());
+        assertSame(flowOutputNamed(node, "Exceeded"), node.routeClick("Exceeded", "u1"),
+                "the port belongs to the button, so a click on it fires the button's branch");
+        assertNull(node.routeClick("Yes", "u1"),
+                "over budget with nowhere to send it, the click is dropped rather than misrouted");
+    }
+
+    @Test
+    void aNonNumericLimitIsIgnoredRatherThanTreatedAsZero() {
+        DiscordSendButtonsNode node = new DiscordSendButtonsNode();
+
+        node.loadState(Map.of("buttonLabels", "Yes", "maxClicksPerPerson", "lots"));
+        node.reconfigure();
+
+        assertEquals(List.of("", "Yes"), node.getFlowOutputs().stream().map(p -> p.name).toList());
+        assertSame(flowOutputNamed(node, "Yes"), node.routeClick("Yes", "u1"));
     }
 }

@@ -157,6 +157,27 @@ class DiscordGatewayTest {
     }
 
     @Test
+    void aDisableOnClickPreferenceCountsWhicheverBotOnTheSessionDeclaredIt() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot first = new DiscordBot();
+        DiscordBot second = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-disable", first, login);
+        DiscordGateway.join("token-disable", second, login);
+
+        second.setButtonDisableOnClick("Yes", false);
+
+        assertTrue(session.isButtonDisableOnClick("Unknown"),
+                "an undeclared button still disables, as a click did before the preference existed");
+        assertFalse(session.isButtonDisableOnClick("Yes"),
+                "the declaring bot's preference must count even though another bot shares the session");
+        assertFalse(first.isButtonDisableOnClick("Yes"),
+                "a connected bot reports what would actually happen on a click, session-wide");
+
+        session.leave(first);
+        session.leave(second);
+    }
+
+    @Test
     void oneBotSyncingRegistersEveryBotsCommandsRatherThanOnlyItsOwn() throws Exception {
         CountingLogin login = new CountingLogin();
         DiscordBot first = new DiscordBot();
