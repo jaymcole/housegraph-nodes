@@ -15,11 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The Set/Clear routing itself needs the engine: only it can build a {@code ProcessContext}
- * carrying which flow port control arrived through, and its constructor is package-private to the
- * API. So what's covered here is everything reachable without one — the writes the routing routes
- * to, the ports it routes between, and the pull path, which is the case a regression would be
- * silent in.
+ * The write routing itself needs the engine: only it can build a {@code ProcessContext} carrying
+ * whether flow arrived, and its constructor is package-private to the API. So what's covered here
+ * is everything reachable without one — the write the routing routes to, the ports it routes
+ * between, and the pull path, which is the case a regression would be silent in. Clearing an entry
+ * is {@link ClearStoredValueNode}'s own node now; see {@code ClearStoredValueNodeTest}.
  */
 class StoredValueNodeTest {
 
@@ -107,32 +107,9 @@ class StoredValueNodeTest {
     }
 
     @Test
-    void clearingRemovesTheEntry() {
-        node.write(store, "lastPayer", "ada");
-
-        node.erase(store, "lastPayer");
-        Nodes.run(node);
-
-        assertEquals("", Nodes.textOf(node, "Value"));
-        assertFalse(Nodes.boolOf(node, "Found"), "a clear must not leave a stale value downstream");
-    }
-
-    @Test
-    void clearingSomethingThatIsntThereWritesNothing() {
-        node.write(store, "other", "x");
-        String before = store.get();
-
-        node.erase(store, "lastPayer");
-
-        assertEquals(before, store.get(), "a no-op edit must not rewrite the file or wake the store's listeners");
-    }
-
-    @Test
     void oneKeysWritesLeaveAnotherKeysAlone() {
         node.write(store, "lastPayer", "ada");
         node.write(store, "lastCurry", "friday");
-
-        node.erase(store, "lastPayer");
 
         assertEquals("friday", node.read(store, "lastCurry"),
                 "several of these nodes share one store, and one must not be able to trample another");
@@ -156,11 +133,10 @@ class StoredValueNodeTest {
     }
 
     @Test
-    void carriesTheSetAndClearEntryPointsAndOneUnnamedFlowOut() {
+    void carriesOneUnnamedFlowInAndOneUnnamedFlowOut() {
         List<FlowPort> flowInputs = node.getFlowInputs();
-        assertEquals(2, flowInputs.size());
-        assertEquals("Set", flowInputs.get(0).name);
-        assertEquals("Clear", flowInputs.get(1).name);
+        assertEquals(1, flowInputs.size());
+        assertEquals("", flowInputs.get(0).name, "a single flow in renders as a bare anchor");
 
         assertEquals(1, node.getFlowOutputs().size());
         assertEquals("", node.getFlowOutputs().get(0).name, "a single flow out renders as a bare anchor");

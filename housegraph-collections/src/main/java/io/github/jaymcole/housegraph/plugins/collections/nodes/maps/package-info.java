@@ -7,7 +7,7 @@
  * <h2>The shape of the package</h2>
  * <ul>
  *   <li><b>In:</b> <b>Build Map</b> from wired pairs, <b>Map from Lists</b> from two lists,
- *       <b>Tally</b> from one list, <b>Collect Entries</b> from a loop.</li>
+ *       <b>Tally</b> from one list, <b>Put In Map</b>/<b>Clear Map</b> from a loop.</li>
  *   <li><b>Out:</b> <b>Map Entries</b> to two lists, <b>Join Map</b> to text.</li>
  *   <li><b>Along the way:</b> <b>Map Get</b>, <b>Map Put</b>, <b>Map Remove</b>, <b>Merge
  *       Maps</b>.</li>

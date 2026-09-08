@@ -17,15 +17,15 @@
  * needs its output, exactly like the host's constants and converters — with deliberate exceptions
  * for the nodes whose whole purpose is to accumulate or reset state across separate firings and
  * which therefore need flow inputs to tell those firings apart:
- * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.lists.AddToCollectionNode} and
- * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.lists.ClearCollectionNode} address
- * their shared list by a Name input rather than by node identity — two node instances anywhere in
- * the graph with the same Name see the same collection — precisely so that "reset, then loop" can
- * be wired as a straight line (trigger &rarr; Clear &rarr; For Each &rarr; Body &rarr; Add) instead
- * of routing back through one node's own flow-out. {@code maps}' equivalent,
- * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.maps.CollectEntriesNode}, still
- * carries both a Put and a Clear port on one node — that inconsistency is known, not a design
- * endorsement of the older shape.
+ * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.lists.AddToCollectionNode} /
+ * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.lists.ClearCollectionNode} for a
+ * list, and {@link io.github.jaymcole.housegraph.plugins.collections.nodes.maps.PutInMapNode} /
+ * {@link io.github.jaymcole.housegraph.plugins.collections.nodes.maps.ClearMapNode} for a map. Each
+ * pair addresses its shared collection by a Name input rather than by node identity — two node
+ * instances anywhere in the graph with the same Name see the same collection — precisely so that
+ * "reset, then loop" can be wired as a straight line (trigger &rarr; Clear &rarr; For Each &rarr;
+ * Body &rarr; Add/Put) instead of one node's Add/Clear or Put/Clear racing on its own flow-in ports,
+ * which is what routing the wiring back through the node's own flow-out used to be needed to avoid.
  * <p>
  * That is why no node here branches on flow. A node that would ("was the key found?") emits a
  * {@code Boolean} instead, to be wired into the host's <b>If (Boolean)</b> — the composable form
