@@ -7,6 +7,9 @@ import io.github.jaymcole.housegraph.graph.Edge;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.graph.ProcessContext;
+import io.github.jaymcole.housegraph.logging.Log;
+import io.github.jaymcole.housegraph.logging.Logger;
+import io.github.jaymcole.housegraph.plugins.discord.ChoiceMode;
 import io.github.jaymcole.housegraph.plugins.discord.CommandOption;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordBot;
 import io.github.jaymcole.housegraph.plugins.discord.DiscordOptionType;
@@ -24,6 +27,9 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.util.StringConverter;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,9 +40,18 @@ import java.util.Map;
 
 /**
  * A modular Discord slash command with typed options. Declare a {@code /command} and its
- * options ({@code env, count:integer}); the node grows one named output port per option,
+ * options ({@code env}, {@code count:integer}); the node grows one named output port per option,
  * plus {@code Channel}, sender, and a {@code Reply} handle. When someone runs the command,
  * it fires its flow-out with each option's value on its matching port.
+ * <p>
+ * An option can also carry a list of values, which Discord treats one of two ways (see
+ * {@link ChoiceMode}): <b>Only these</b> registers them as the option's choices, so Discord shows
+ * a picker and refuses anything else — capped at 25 by Discord, and fixed until the command is
+ * re-registered; <b>Suggest</b> turns on autocomplete instead, so the matching values are offered
+ * as someone types but they may still submit something else, and the list isn't capped. Suggestions
+ * are answered by the bot's session from what was registered, not by running the graph — Discord
+ * gives about three seconds. Discord takes a list only on text and integer options, so the fields
+ * are disabled for the others.
  * <p>
  * Wire a Discord Bot node's {@code Bot} output into this node's {@code Bot} input;
  * {@link #onInputEdgeAdded}/{@link #onInputEdgeRemoved} (re)subscribe against whatever
@@ -59,6 +74,8 @@ import java.util.Map;
 @Display.Name("Discord Slash Command")
 @Node.Type("discord.DiscordSlashCommandNode")
 public class DiscordSlashCommandNode extends BaseNode implements NodeContentProvider {
+
+    private static final Logger log = Log.get(DiscordSlashCommandNode.class);
 
     private static final String DESCRIPTION = "HouseGraph command";
 
@@ -238,52 +255,120 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
 
         // Options are edited as rows and applied all at once, so the node's ports rebuild
         // just once (on Apply) rather than jarringly on every keystroke.
-        VBox optionRows = new VBox(3);
+        VBox optionRows = new VBox(6);
         for (CommandOption option : options) {
-            optionRows.getChildren().add(optionRow(option));
+            optionRows.getChildren().add(new OptionRow(option));
         }
 
         Button addButton = new Button("+ Option");
         addButton.setOnAction(e -> optionRows.getChildren()
-                .add(optionRow(new CommandOption("option" + (optionRows.getChildren().size() + 1), DiscordOptionType.TEXT))));
+                .add(new OptionRow(new CommandOption("option" + (optionRows.getChildren().size() + 1), DiscordOptionType.TEXT))));
 
         Button applyButton = new Button("Apply");
         applyButton.setOnAction(e -> applyOptionRows(optionRows));
 
         Label optionsLabel = new Label("Options");
         optionsLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10px;");
+        Label valuesHint = new Label("Leave an option's values empty for free input. \"Only these\" makes Discord\nrefuse anything else (max 25); \"Suggest\" autocompletes but still allows others.");
+        valuesHint.setWrapText(true);
+        valuesHint.setStyle("-fx-text-fill: #888888; -fx-font-size: 9px;");
 
         return new VBox(4, commandField, ephemeralBox, hiddenBox, hiddenHint,
-                optionsLabel, optionRows, new HBox(6, addButton, applyButton));
+                optionsLabel, valuesHint, optionRows, new HBox(6, addButton, applyButton));
     }
 
-    /** One editable option row (name, type, remove); read back on Apply. */
-    private HBox optionRow(CommandOption option) {
-        TextField name = new TextField(option.name());
-        name.setPromptText("name");
-        HBox.setHgrow(name, Priority.ALWAYS);
+    /**
+     * One editable option: name and type on the first line, the values it offers on the second.
+     * A class rather than an HBox read back by index, because the controls now depend on each
+     * other — an empty value list means free input whatever the mode says, and a type Discord
+     * takes no list for disables both. Read back on Apply.
+     */
+    private static final class OptionRow extends VBox {
 
-        ComboBox<DiscordOptionType> type = new ComboBox<>();
-        type.getItems().setAll(DiscordOptionType.values());
-        type.setValue(option.type());
+        private final TextField name = new TextField();
+        private final ComboBox<DiscordOptionType> type = new ComboBox<>();
+        private final ComboBox<ChoiceMode> mode = new ComboBox<>();
+        private final TextField values = new TextField();
 
-        HBox row = new HBox(4, name, type);
-        Button remove = new Button("×");
-        remove.setOnAction(e -> ((VBox) row.getParent()).getChildren().remove(row));
-        row.getChildren().add(remove);
-        return row;
+        OptionRow(CommandOption option) {
+            super(3);
+            name.setText(option.name());
+            name.setPromptText("name");
+            HBox.setHgrow(name, Priority.ALWAYS);
+
+            type.getItems().setAll(DiscordOptionType.values());
+            type.setValue(option.type());
+            type.valueProperty().addListener((obs, was, now) -> updateValueControls());
+
+            // FREE isn't offered: it is what an empty value list already means, and a mode
+            // saying "no list" next to a field holding one is a contradiction to explain away.
+            mode.getItems().setAll(ChoiceMode.RESTRICTED, ChoiceMode.SUGGESTED);
+            mode.setValue(option.choiceMode() == ChoiceMode.SUGGESTED ? ChoiceMode.SUGGESTED : ChoiceMode.RESTRICTED);
+            mode.setConverter(new StringConverter<>() {
+                @Override
+                public String toString(ChoiceMode value) {
+                    return value == ChoiceMode.SUGGESTED ? "Suggest" : "Only these";
+                }
+
+                @Override
+                public ChoiceMode fromString(String text) {
+                    return "Suggest".equals(text) ? ChoiceMode.SUGGESTED : ChoiceMode.RESTRICTED;
+                }
+            });
+
+            values.setText(String.join(", ", option.choices()));
+            values.setPromptText("values, comma separated");
+            HBox.setHgrow(values, Priority.ALWAYS);
+
+            Button remove = new Button("×");
+            remove.setOnAction(e -> ((VBox) getParent()).getChildren().remove(this));
+
+            getChildren().addAll(new HBox(4, name, type, remove), new HBox(4, mode, values));
+            updateValueControls();
+        }
+
+        /** What this row describes now, or null if it has no usable name. */
+        CommandOption toOption() {
+            String normalized = name.getText() == null ? "" : name.getText().trim().toLowerCase(Locale.ROOT);
+            if (normalized.isEmpty()) {
+                return null;
+            }
+            List<String> declared = splitValues(values.getText());
+            // CommandOption normalizes the rest: an empty list pairs with FREE, and a type
+            // Discord takes no list for drops one it was handed anyway.
+            return new CommandOption(normalized,
+                    type.getValue() == null ? DiscordOptionType.TEXT : type.getValue(),
+                    declared,
+                    declared.isEmpty() ? ChoiceMode.FREE : mode.getValue());
+        }
+
+        /** Greys out the value fields for a type Discord takes no list for (boolean, user). */
+        private void updateValueControls() {
+            boolean supported = type.getValue() == null || type.getValue().supportsChoices();
+            mode.setDisable(!supported);
+            values.setDisable(!supported);
+        }
+
+        private static List<String> splitValues(String text) {
+            List<String> values = new ArrayList<>();
+            if (text == null) {
+                return values;
+            }
+            for (String entry : text.split(",")) {
+                if (!entry.isBlank()) {
+                    values.add(entry.trim());
+                }
+            }
+            return values;
+        }
     }
 
-    @SuppressWarnings("unchecked")
     private void applyOptionRows(VBox optionRows) {
         List<CommandOption> edited = new ArrayList<>();
         for (javafx.scene.Node rowNode : optionRows.getChildren()) {
-            HBox row = (HBox) rowNode;
-            String name = ((TextField) row.getChildren().get(0)).getText();
-            DiscordOptionType type = ((ComboBox<DiscordOptionType>) row.getChildren().get(1)).getValue();
-            String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
-            if (!normalized.isEmpty()) {
-                edited.add(new CommandOption(normalized, type == null ? DiscordOptionType.TEXT : type));
+            CommandOption option = ((OptionRow) rowNode).toOption();
+            if (option != null) {
+                edited.add(option);
             }
         }
         if (edited.equals(options)) {
@@ -295,13 +380,69 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         rebuildPorts();
     }
 
-    // --- Option text parsing/formatting (e.g. "env, count:integer") ---------------
+    // --- Option state -------------------------------------------------------------
 
-    private static List<CommandOption> parseOptions(String text) {
-        List<CommandOption> parsed = new ArrayList<>();
-        if (text == null) {
-            return parsed;
+    /**
+     * The options as saved: a JSON array of <code>{name, type, values, mode}</code> entries, the
+     * last two present only for an option that offers values. JSON rather than the
+     * {@code "env, count:integer"} text this used to save, because those values are arbitrary
+     * text a person typed and every delimiter that could separate them is one a value is allowed
+     * to contain. Graphs saved in the old format still load — see {@link #parseOptions}.
+     */
+    private static String formatOptions(List<CommandOption> options) {
+        JSONArray saved = new JSONArray();
+        for (CommandOption option : options) {
+            JSONObject entry = new JSONObject();
+            entry.put("name", option.name());
+            entry.put("type", option.type().name().toLowerCase(Locale.ROOT));
+            if (!option.choices().isEmpty()) {
+                entry.put("values", new JSONArray(option.choices()));
+                entry.put("mode", option.choiceMode().name().toLowerCase(Locale.ROOT));
+            }
+            saved.put(entry);
         }
+        return saved.toString();
+    }
+
+    /**
+     * Reads back what {@link #formatOptions} wrote — or, for a graph saved before options could
+     * offer values, the {@code "env, count:integer"} text that came before it. Unreadable state
+     * loads as no options rather than throwing, which would take the whole graph down with it.
+     */
+    private static List<CommandOption> parseOptions(String text) {
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+        if (!text.trim().startsWith("[")) {
+            return parseLegacyOptions(text);
+        }
+        List<CommandOption> parsed = new ArrayList<>();
+        try {
+            JSONArray saved = new JSONArray(text);
+            for (int i = 0; i < saved.length(); i++) {
+                JSONObject entry = saved.getJSONObject(i);
+                String name = entry.optString("name").trim().toLowerCase(Locale.ROOT);
+                if (name.isEmpty()) {
+                    continue;
+                }
+                List<String> values = new ArrayList<>();
+                JSONArray declared = entry.optJSONArray("values");
+                for (int value = 0; declared != null && value < declared.length(); value++) {
+                    values.add(declared.optString(value));
+                }
+                parsed.add(new CommandOption(name, parseType(entry.optString("type")), values,
+                        values.isEmpty() ? ChoiceMode.FREE : parseMode(entry.optString("mode"))));
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not read this slash command node's saved options; starting with none: {}", e.getMessage());
+            return List.of();
+        }
+        return parsed;
+    }
+
+    /** The pre-values format: a comma-separated {@code name[:type]} list, all of it free input. */
+    private static List<CommandOption> parseLegacyOptions(String text) {
+        List<CommandOption> parsed = new ArrayList<>();
         for (String entry : text.split(",")) {
             String trimmed = entry.trim();
             if (trimmed.isEmpty()) {
@@ -326,14 +467,12 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         };
     }
 
-    private static String formatOptions(List<CommandOption> options) {
-        StringBuilder text = new StringBuilder();
-        for (CommandOption option : options) {
-            if (text.length() > 0) {
-                text.append(", ");
-            }
-            text.append(option.name()).append(':').append(option.type().name().toLowerCase(Locale.ROOT));
-        }
-        return text.toString();
+    /**
+     * Only called with a value list present, so an unreadable (or hand-written and missing) mode
+     * means restricting rather than dropping the list: a list the user meant to enforce and that
+     * quietly stopped being enforced is the worse of the two failures.
+     */
+    private static ChoiceMode parseMode(String text) {
+        return "suggested".equals(text.toLowerCase(Locale.ROOT)) ? ChoiceMode.SUGGESTED : ChoiceMode.RESTRICTED;
     }
 }
