@@ -1,6 +1,9 @@
 package io.github.jaymcole.housegraph.plugins.discord;
 
 import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.interactions.commands.Command;
+import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -232,6 +235,119 @@ class DiscordGatewayTest {
 
         session.leave(guildBot);
         session.leave(globalBot);
+    }
+
+    @Test
+    void anOptionRestrictedToValuesRegistersThemAsDiscordChoices() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-choices", bot, login);
+
+        OptionData option = onlyOption(session, spec("deploy",
+                new CommandOption("env", DiscordOptionType.TEXT, List.of("prod", "staging"), ChoiceMode.RESTRICTED)));
+
+        assertEquals(List.of("prod", "staging"), option.getChoices().stream().map(Command.Choice::getAsString).toList(),
+                "restricting an option is Discord's own choice list - that is what makes it refuse anything else");
+        assertFalse(option.isAutoComplete(), "Discord allows choices or autocomplete on an option, never both");
+        assertFalse(option.isRequired(), "offering values says what may be passed, not that something must be");
+
+        session.leave(bot);
+    }
+
+    @Test
+    void anOptionSuggestingValuesAutocompletesInsteadOfRestricting() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-suggest", bot, login);
+
+        OptionData option = onlyOption(session, spec("deploy",
+                new CommandOption("env", DiscordOptionType.TEXT, List.of("prod", "staging"), ChoiceMode.SUGGESTED)));
+
+        assertTrue(option.isAutoComplete());
+        assertEquals(List.of(), option.getChoices(),
+                "suggestions are answered per keystroke, so they are not registered as choices - "
+                        + "which is also why they aren't capped at 25");
+        assertEquals(List.of("staging"), session.suggestionsFor("deploy", "env", "stag"));
+
+        session.leave(bot);
+    }
+
+    @Test
+    void suggestionsMatchIgnoringCaseWithTheOnesTypedIntoFirst() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-suggest-order", bot, login);
+        onlyOption(session, spec("deploy", new CommandOption("env", DiscordOptionType.TEXT,
+                List.of("staging-eu", "Prod", "preprod"), ChoiceMode.SUGGESTED)));
+
+        assertEquals(List.of("Prod", "preprod"), session.suggestionsFor("deploy", "env", "PROD"),
+                "a value that starts with what was typed is the likelier target, so it comes first");
+        assertEquals(List.of("staging-eu", "Prod", "preprod"), session.suggestionsFor("deploy", "env", ""),
+                "nothing typed yet matches everything, in declared order");
+        assertEquals(List.of(), session.suggestionsFor("deploy", "env", "nope"));
+
+        session.leave(bot);
+    }
+
+    @Test
+    void onlyTheTwentyFiveSuggestionsDiscordShowsAreOffered() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-suggest-cap", bot, login);
+        List<String> hosts = new ArrayList<>();
+        for (int i = 0; i < 40; i++) {
+            hosts.add("host-" + i);
+        }
+        onlyOption(session, spec("ssh", new CommandOption("host", DiscordOptionType.TEXT, hosts, ChoiceMode.SUGGESTED)));
+
+        assertEquals(OptionData.MAX_CHOICES, session.suggestionsFor("ssh", "host", "host").size(),
+                "declaring more than Discord shows is allowed - answering with more is not");
+
+        session.leave(bot);
+    }
+
+    @Test
+    void nothingIsSuggestedForAnOptionThisSessionRegisteredNoneFor() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-suggest-unknown", bot, login);
+        onlyOption(session, spec("deploy", new CommandOption("env", DiscordOptionType.TEXT, List.of("prod"), ChoiceMode.SUGGESTED)));
+
+        assertEquals(List.of(), session.suggestionsFor("deploy", "elsewhere", ""), "no such option");
+        assertEquals(List.of(), session.suggestionsFor("other", "env", ""), "no such command");
+
+        session.leave(bot);
+    }
+
+    @Test
+    void anIntegerOptionKeepsOnlyValuesDiscordCanTakeAsNumbers() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-numbers", bot, login);
+
+        OptionData restricted = onlyOption(session, spec("scale",
+                new CommandOption("count", DiscordOptionType.INTEGER, List.of("1", "two", "3"), ChoiceMode.RESTRICTED)));
+        assertEquals(List.of(1L, 3L), restricted.getChoices().stream().map(Command.Choice::getAsLong).toList(),
+                "a non-numeric choice would have Discord reject the whole command, so it is dropped on its own");
+
+        onlyOption(session, spec("wait",
+                new CommandOption("seconds", DiscordOptionType.INTEGER, List.of("5", "soon", "10"), ChoiceMode.SUGGESTED)));
+        assertEquals(List.of("5", "10"), session.suggestionsFor("wait", "seconds", ""),
+                "an integer option's suggestions go to Discord as numbers, so a word could never be offered");
+
+        session.leave(bot);
+    }
+
+    /** Registers {@code spec} the way a sync would and hands back the one option it declares. */
+    private static OptionData onlyOption(DiscordGateway session, SlashCommandSpec spec) {
+        List<SlashCommandData> data = session.toCommandData(List.of(spec));
+        assertEquals(1, data.size());
+        assertEquals(1, data.get(0).getOptions().size());
+        return data.get(0).getOptions().get(0);
+    }
+
+    private static SlashCommandSpec spec(String name, CommandOption... options) {
+        return new SlashCommandSpec(name, name, false, false, List.of(options));
     }
 
     private static SlashCommandSpec spec(String name) {

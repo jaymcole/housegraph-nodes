@@ -9,5 +9,15 @@ public enum DiscordOptionType {
     TEXT,
     INTEGER,
     BOOLEAN,
-    USER
+    USER;
+
+    /**
+     * Whether Discord lets this kind of option carry a list of values — as fixed choices or as
+     * autocomplete suggestions. Discord allows both only on its string, integer and number
+     * options; a boolean is already a two-value picker and a user is picked from the server's
+     * members, so neither takes a list of ours.
+     */
+    public boolean supportsChoices() {
+        return this == TEXT || this == INTEGER;
+    }
 }

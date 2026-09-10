@@ -29,7 +29,10 @@ import java.util.function.Consumer;
  *       single handler.</li>
  *   <li>slash commands are registered via {@link #syncCommands} and their invocations
  *       delivered to every {@link #addSlashListener listener}, deferred so a slow graph
- *       has time (~15 min) to answer through the {@link DiscordReply} handle.</li>
+ *       has time (~15 min) to answer through the {@link DiscordReply} handle. An option declared
+ *       {@link ChoiceMode#SUGGESTED} autocompletes from the values it was registered with,
+ *       answered by the session itself — Discord's three-second window for that leaves no room
+ *       to ask the graph.</li>
  *   <li>{@link #sendMessage} posts to a channel by id, optionally with buttons attached;
  *       clicks on those buttons are delivered to every {@link #addButtonListener listener},
  *       deferred the same way as slash commands so a slow graph still gets to answer. A click

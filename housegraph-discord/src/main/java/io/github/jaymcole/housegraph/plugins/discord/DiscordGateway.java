@@ -5,15 +5,18 @@ import io.github.jaymcole.housegraph.logging.Logger;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.interactions.AutoCompleteQuery;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
+import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
@@ -50,8 +53,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <h2>What the session owns</h2>
  * Everything that must happen once per connection rather than once per node: the {@link JDA}
  * instance, the single event bridge (so an interaction is deferred exactly once, then handed to
- * every joined bot), the {@link #syncCommands() union} of all joined bots' slash commands, and the
- * ephemeral flags consulted at defer time.
+ * every joined bot), the {@link #syncCommands() union} of all joined bots' slash commands, the
+ * ephemeral flags consulted at defer time, and the autocomplete suggestions answered from (see
+ * {@link #suggestionsFor}).
  *
  * <h2>Scope: this process only</h2>
  * This dedupes within one JVM, which is one graph <em>file</em>: every Discord Bot node in a file,
@@ -87,6 +91,15 @@ final class DiscordGateway {
     private final CopyOnWriteArrayList<DiscordBot> members = new CopyOnWriteArrayList<>();
     /** Command name (lowercase) -> whether its reply is ephemeral; rebuilt by {@link #syncCommands()}. */
     private final Map<String, Boolean> ephemeralByCommand = new ConcurrentHashMap<>();
+    /**
+     * Command name -> option name -> the values that option suggests, for every
+     * {@link ChoiceMode#SUGGESTED} option registered; rebuilt by {@link #syncCommands()}. Kept
+     * here, on the session, because Discord gives an autocomplete request about three seconds
+     * to be answered — far too little to hand to a graph and wait — so the suggestions are
+     * whatever was declared at registration and are answered from memory (see
+     * {@link Bridge#onCommandAutoCompleteInteraction}). Both keys are lowercase.
+     */
+    private final Map<String, Map<String, List<String>>> suggestionsByCommand = new ConcurrentHashMap<>();
     private volatile JDA jda;
 
     private DiscordGateway(String token) {
@@ -180,6 +193,7 @@ final class DiscordGateway {
             return;
         }
         ephemeralByCommand.clear();
+        suggestionsByCommand.clear();
         Map<String, List<SlashCommandSpec>> byGuild = commandGroups();
 
         boolean syncGlobal = byGuild.containsKey(null);
@@ -264,20 +278,24 @@ final class DiscordGateway {
 
     /**
      * Turns declared specs into JDA command data, recording each one's ephemeral flag for
-     * {@link Bridge} to consult at defer time. A spec with
+     * {@link Bridge} to consult at defer time and each autocompleting option's suggestions for it
+     * to answer from. A spec with
      * {@link SlashCommandSpec#hiddenByDefault()} set registers with its default member permissions
      * disabled, hiding it from everyone's command picker; Discord only lets a bot control that
      * all-or-nothing default, so granting it back to specific roles is a manual step a server
      * admin does per-guild in Server Settings -&gt; Integrations.
+     * <p>
+     * Package-private rather than private so a test can register a spec and read back what
+     * Discord would be told, without a connection.
      */
-    private List<SlashCommandData> toCommandData(List<SlashCommandSpec> specs) {
+    List<SlashCommandData> toCommandData(List<SlashCommandSpec> specs) {
         List<SlashCommandData> data = new ArrayList<>();
         for (SlashCommandSpec spec : specs) {
             String name = spec.name().toLowerCase(Locale.ROOT);
             try {
                 SlashCommandData command = Commands.slash(name, spec.description());
                 for (CommandOption option : spec.options()) {
-                    command.addOption(toJdaType(option.type()), option.name().toLowerCase(Locale.ROOT), option.name(), false);
+                    command.addOptions(toOptionData(name, option));
                 }
                 if (spec.hiddenByDefault()) {
                     command.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
@@ -291,6 +309,111 @@ final class DiscordGateway {
             }
         }
         return data;
+    }
+
+    /**
+     * One option, as Discord is told about it. A {@link ChoiceMode#RESTRICTED} list becomes the
+     * option's choices, which Discord enforces; a {@link ChoiceMode#SUGGESTED} one turns
+     * autocomplete on instead and is remembered here to answer with (Discord asks the bot per
+     * keystroke rather than taking the list up front, which is exactly why that list isn't capped
+     * at 25 the way a choice list is).
+     */
+    private OptionData toOptionData(String command, CommandOption option) {
+        String name = option.name().toLowerCase(Locale.ROOT);
+        OptionData data = new OptionData(toJdaType(option.type()), name, option.name());
+        switch (option.choiceMode()) {
+            case RESTRICTED -> addChoices(data, command, option);
+            case SUGGESTED -> {
+                data.setAutoComplete(true);
+                suggestionsByCommand.computeIfAbsent(command, key -> new ConcurrentHashMap<>())
+                        .put(name, offerable(command, option));
+            }
+            case FREE -> {
+                // Nothing to declare: any value of the type is accepted.
+            }
+        }
+        return data;
+    }
+
+    /**
+     * A suggested option's values, minus any this option's type could never offer: an integer
+     * option's suggestions go to Discord as numbers, so a non-numeric one would simply never
+     * appear. Dropped here, at declaration time and with a warning, rather than silently per
+     * keystroke.
+     */
+    private static List<String> offerable(String command, CommandOption option) {
+        if (option.type() != DiscordOptionType.INTEGER) {
+            return option.choices();
+        }
+        List<String> numeric = new ArrayList<>();
+        for (String choice : option.choices()) {
+            try {
+                Long.parseLong(choice.trim());
+                numeric.add(choice.trim());
+            } catch (NumberFormatException e) {
+                log.warn("/{} option \"{}\" is an integer, so its suggestion \"{}\" is dropped",
+                        command, option.name(), choice);
+            }
+        }
+        return List.copyOf(numeric);
+    }
+
+    /**
+     * Adds a restricted option's values as Discord choices. A value Discord won't take is dropped
+     * on its own — the whole command would otherwise be skipped by the caller's catch, costing
+     * every other option over one bad entry — and so is anything past Discord's cap of 25, which
+     * is where a long list wants {@link ChoiceMode#SUGGESTED} instead.
+     */
+    private static void addChoices(OptionData data, String command, CommandOption option) {
+        List<String> choices = option.choices();
+        if (choices.size() > OptionData.MAX_CHOICES) {
+            log.warn("/{} option \"{}\" declares {} choices; Discord takes {}, so the rest are dropped"
+                            + " (a suggested list has no such limit)",
+                    command, option.name(), choices.size(), OptionData.MAX_CHOICES);
+            choices = choices.subList(0, OptionData.MAX_CHOICES);
+        }
+        for (String choice : choices) {
+            try {
+                if (option.type() == DiscordOptionType.INTEGER) {
+                    data.addChoice(choice, Long.parseLong(choice.trim()));
+                } else {
+                    data.addChoice(choice, choice);
+                }
+            } catch (NumberFormatException e) {
+                log.warn("/{} option \"{}\" is an integer, so its choice \"{}\" is dropped",
+                        command, option.name(), choice);
+            } catch (IllegalArgumentException e) {
+                log.warn("/{} option \"{}\": dropping choice \"{}\" - {}",
+                        command, option.name(), choice, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * What to offer for {@code option} of {@code command} while someone has typed {@code typed}
+     * into it: the values declared for it, narrowed to those that match and capped at the 25
+     * Discord displays. Values that start with what was typed come first, then values that merely
+     * contain it, so typing the beginning of a value brings it to the top; matching ignores case.
+     * An option nothing was declared for (or a command from another bot on this token) answers
+     * with nothing rather than guessing.
+     */
+    List<String> suggestionsFor(String command, String option, String typed) {
+        List<String> declared = suggestionsByCommand
+                .getOrDefault(command.toLowerCase(Locale.ROOT), Map.of())
+                .getOrDefault(option.toLowerCase(Locale.ROOT), List.of());
+        String query = typed == null ? "" : typed.trim().toLowerCase(Locale.ROOT);
+        List<String> prefixed = new ArrayList<>();
+        List<String> contained = new ArrayList<>();
+        for (String value : declared) {
+            String lower = value.toLowerCase(Locale.ROOT);
+            if (lower.startsWith(query)) {
+                prefixed.add(value);
+            } else if (lower.contains(query)) {
+                contained.add(value);
+            }
+        }
+        prefixed.addAll(contained);
+        return prefixed.size() > OptionData.MAX_CHOICES ? prefixed.subList(0, OptionData.MAX_CHOICES) : prefixed;
     }
 
     private JDA logIn(Login login) throws InterruptedException {
@@ -361,6 +484,27 @@ final class DiscordGateway {
                     event.getUser().getEffectiveName(),
                     reply);
             members.forEach(member -> member.deliverSlashCommand(slashCommand));
+        }
+
+        /**
+         * Answers Discord's "what should I suggest?" for an option declared
+         * {@link ChoiceMode#SUGGESTED}. Unlike a slash command or a button click this one can't be
+         * deferred — Discord wants the list inside its three-second window and there is no
+         * acknowledge-now-answer-later hook for it — so it is answered from what was recorded at
+         * registration rather than by asking the graph. An option this session has nothing for
+         * gets an empty reply, which Discord shows as "no options match".
+         */
+        @Override
+        public void onCommandAutoCompleteInteraction(CommandAutoCompleteInteractionEvent event) {
+            AutoCompleteQuery focused = event.getFocusedOption();
+            List<String> matches = suggestionsFor(event.getName(), focused.getName(), focused.getValue());
+            if (focused.getType() == OptionType.INTEGER) {
+                // Discord takes an integer option's suggestions as numbers; anything that wasn't
+                // one was already dropped (with a warning) when the option was registered.
+                event.replyChoiceLongs(matches.stream().map(Long::parseLong).toList()).queue();
+            } else {
+                event.replyChoiceStrings(matches).queue();
+            }
         }
 
         @Override
