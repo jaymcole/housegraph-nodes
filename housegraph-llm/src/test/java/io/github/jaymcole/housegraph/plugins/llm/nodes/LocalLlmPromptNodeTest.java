@@ -21,6 +21,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,14 +45,17 @@ class LocalLlmPromptNodeTest {
 
         assertEquals(List.of("Prompt", "System Prompt", "Conversation ID", "History Turns",
                         "Forget After (min)", "Model", "Server", "API", "Temperature",
-                        "Context (tokens)", "API Key", "Timeout (s)"),
+                        "Context (tokens)", "Think", "Update Every (ms)", "API Key", "Timeout (s)"),
                 Nodes.inputNames(node));
-        assertEquals(List.of("Response", "Turns"), Nodes.outputNames(node));
+        assertEquals(List.of("Response", "Thinking", "Answer So Far", "New Text", "Phase", "Turns"),
+                Nodes.outputNames(node));
         // One flow-in, still called Ask: a graph saved against v3.0.0 recorded its edge by that
         // name, and a blank-named port is referenced by position instead, so going back to a bare
         // anchor would drop that edge on load.
         assertEquals(List.of("Ask"), Nodes.flowInputNames(node));
-        assertEquals(1, node.getFlowOutputs().size());
+        // The answer's port is still the unnamed one, and still first: a graph saved before Update
+        // existed recorded its flow edge by position.
+        assertEquals(List.of("", "Update"), Nodes.flowOutputNames(node));
         assertEquals(FlowPort.Direction.IN, node.getFlowInputs().get(0).direction);
     }
 
@@ -63,6 +67,50 @@ class LocalLlmPromptNodeTest {
         assertEquals(LocalLlmClient.DEFAULT_MODEL, Nodes.inputOf(node, "Model"));
         assertEquals("ollama", Nodes.inputOf(node, "API"));
         assertEquals(LocalLlmClient.DEFAULT_TIMEOUT_SECONDS, (Integer) Nodes.inputOf(node, "Timeout (s)"));
+    }
+
+    @Test
+    void itDoesNotStreamAndDoesNotThinkUntilItIsAskedTo() {
+        LocalLlmPromptNode node = new LocalLlmPromptNode();
+
+        // Both defaults are about not changing what an existing graph does. Streaming off keeps a
+        // run to one request and one reply, and costs no sub-runs for an Update port nobody wired;
+        // a blank Think sends no field at all, which is the only setting every model accepts.
+        assertEquals(0, (Integer) Nodes.inputOf(node, "Update Every (ms)"));
+        assertNull(Nodes.inputOf(node, "Think"));
+    }
+
+    @Test
+    void aRunThatDoesNotStreamAsksForOneWholeReply() throws IOException {
+        String address = serve("{\"response\":\"Frank Herbert.\"}");
+        LocalLlmPromptNode node = new LocalLlmPromptNode();
+        Nodes.set(node, "Server", address);
+        Nodes.set(node, "Prompt", "Who wrote Dune?");
+
+        Nodes.run(node);
+
+        assertFalse(new JSONObject(lastBody).getBoolean("stream"));
+        assertEquals("Frank Herbert.", Nodes.get(node, "Response"));
+        // The progress outputs still describe the run, so a graph reading them on the end gets the
+        // finished answer rather than a stale snapshot.
+        assertEquals("Frank Herbert.", Nodes.get(node, "Answer So Far"));
+        assertEquals("done", Nodes.get(node, "Phase"));
+        assertEquals("", Nodes.get(node, "New Text"));
+    }
+
+    @Test
+    void anUnstreamedRunStillPublishesWhatTheModelThought() throws IOException {
+        String address = serve("{\"thinking\":\"Dune is a book.\",\"response\":\"Frank Herbert.\"}");
+        LocalLlmPromptNode node = new LocalLlmPromptNode();
+        Nodes.set(node, "Server", address);
+        Nodes.set(node, "Prompt", "Who wrote Dune?");
+        Nodes.set(node, "Think", "true");
+
+        Nodes.run(node);
+
+        assertEquals("true", new JSONObject(lastBody).get("think").toString());
+        assertEquals("Dune is a book.", Nodes.get(node, "Thinking"));
+        assertEquals("Frank Herbert.", Nodes.get(node, "Response"), "reasoning must not reach the answer");
     }
 
     @Test

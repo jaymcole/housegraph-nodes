@@ -36,16 +36,24 @@ import java.util.List;
  *                       or less than one leaves the server's own default alone
  * @param apiKey         an optional bearer token; null or blank sends no Authorization header
  * @param timeoutSeconds how long to wait for the whole answer, clamped to at least one second
+ * @param streaming      whether to ask the server to stream the answer as it is generated, so the
+ *                       caller can show progress; false asks for the single reply this library
+ *                       sent before progress updates existed
+ * @param think          an optional thinking setting ({@code true}, {@code false}, or a level such
+ *                       as {@code low}); null or blank sends none, which is not the same as
+ *                       {@code false} - see {@link LlmApi}
  */
 public record LlmRequest(LlmApi api, String server, String model, String system,
                          List<LlmMessage> history, boolean conversational, String prompt,
-                         Float temperature, Integer contextTokens, String apiKey, int timeoutSeconds) {
+                         Float temperature, Integer contextTokens, String apiKey, int timeoutSeconds,
+                         boolean streaming, String think) {
 
     public LlmRequest {
         api = api == null ? LlmApi.OLLAMA : api;
         server = server == null ? "" : server.trim();
         model = model == null ? "" : model.trim();
         apiKey = apiKey == null ? "" : apiKey.trim();
+        think = think == null ? "" : think.trim();
         history = history == null ? List.of() : List.copyOf(history);
         conversational = conversational || !history.isEmpty();
         // A context window of zero or less is not a smaller window, it is a nonsense one: treat it
@@ -64,10 +72,22 @@ public record LlmRequest(LlmApi api, String server, String model, String system,
         timeoutSeconds = Math.max(1, timeoutSeconds);
     }
 
+    /**
+     * A request that does not stream and sets no thinking option — the eleven-argument request
+     * this library sent before either existed, kept so every caller that does not care about
+     * progress reads as it always did.
+     */
+    public LlmRequest(LlmApi api, String server, String model, String system,
+                      List<LlmMessage> history, boolean conversational, String prompt,
+                      Float temperature, Integer contextTokens, String apiKey, int timeoutSeconds) {
+        this(api, server, model, system, history, conversational, prompt, temperature, contextTokens,
+                apiKey, timeoutSeconds, false, null);
+    }
+
     /** A one-shot prompt, remembering nothing — the request this library sent before conversations existed. */
     public LlmRequest(LlmApi api, String server, String model, String system, String prompt,
                       Float temperature, String apiKey, int timeoutSeconds) {
         this(api, server, model, system, List.of(), false, prompt, temperature, null, apiKey,
-                timeoutSeconds);
+                timeoutSeconds, false, null);
     }
 }

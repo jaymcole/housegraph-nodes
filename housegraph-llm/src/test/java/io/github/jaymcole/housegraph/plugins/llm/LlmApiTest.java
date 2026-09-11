@@ -280,6 +280,58 @@ class LlmApiTest {
         assertTrue(failure.getMessage().contains("response or message.content"), failure.getMessage());
     }
 
+    @Test
+    void streamingIsAskedForOnlyWhenTheRequestWantsIt() {
+        for (LlmApi api : List.of(LlmApi.OLLAMA, LlmApi.OPENAI)) {
+            assertFalse(new JSONObject(api.requestBody(request(api, null, null))).getBoolean("stream"),
+                    api.label() + " must not stream a request that did not ask to");
+            assertTrue(new JSONObject(api.requestBody(streaming(api, null))).getBoolean("stream"), api.label());
+        }
+    }
+
+    @Test
+    void aBlankThinkSettingSendsNoFieldAtAll() {
+        // The important one. Ollama answers HTTP 400 "does not support thinking" for a model that
+        // cannot, so a field sent by default would break every graph pointed at an ordinary model.
+        for (String blank : new String[]{null, "", "   "}) {
+            JSONObject body = new JSONObject(LlmApi.OLLAMA.requestBody(streaming(LlmApi.OLLAMA, blank)));
+            assertFalse(body.has("think"), "blank must not send think, not even as false");
+        }
+    }
+
+    @Test
+    void trueAndFalseAreSentAsBooleansAndALevelAsItsName() {
+        assertEquals(true, new JSONObject(LlmApi.OLLAMA.requestBody(streaming(LlmApi.OLLAMA, "true"))).get("think"));
+        assertEquals(false, new JSONObject(LlmApi.OLLAMA.requestBody(streaming(LlmApi.OLLAMA, "False"))).get("think"));
+        assertEquals("low", new JSONObject(LlmApi.OLLAMA.requestBody(streaming(LlmApi.OLLAMA, "low"))).get("think"));
+    }
+
+    @Test
+    void thinkIsDroppedForAnOpenAiServerRatherThanSentWhereItIsNotUnderstood() {
+        // num_ctx's reason: there is no agreed request field, so sending one invites a rejection
+        // from a server that validates its input.
+        assertFalse(new JSONObject(LlmApi.OPENAI.requestBody(streaming(LlmApi.OPENAI, "true"))).has("think"));
+    }
+
+    @Test
+    void reasoningIsReadBackOutOfAnUnstreamedOllamaReplyInEitherShape() {
+        assertEquals("Let me check.", LlmApi.OLLAMA.thinkingFrom(
+                "{\"thinking\":\"Let me check.\",\"response\":\"Frank Herbert.\"}"));
+        assertEquals("Let me check.", LlmApi.OLLAMA.thinkingFrom(
+                "{\"message\":{\"content\":\"Frank Herbert.\",\"thinking\":\"Let me check.\"}}"));
+        // A model that was not asked to think answers without the field, which is ordinary rather
+        // than a server speaking the wrong protocol - unlike a missing content field.
+        assertEquals("", LlmApi.OLLAMA.thinkingFrom("{\"response\":\"Frank Herbert.\"}"));
+        assertEquals("", LlmApi.OPENAI.thinkingFrom(
+                "{\"choices\":[{\"message\":{\"content\":\"Frank Herbert.\"}}]}"));
+    }
+
+    /** A streaming request, with an authored thinking setting. */
+    private static LlmRequest streaming(LlmApi api, String think) {
+        return new LlmRequest(api, "http://localhost:11434", "llama3.2", null, List.of(), false,
+                "Why is the sky blue?", null, null, null, 30, true, think);
+    }
+
     private static LlmRequest request(LlmApi api, String system, Float temperature) {
         return new LlmRequest(api, "http://localhost:11434", "llama3.2", system, "Why is the sky blue?",
                 temperature, null, 30);
