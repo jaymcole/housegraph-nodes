@@ -134,20 +134,48 @@ hand-formatting role labels. It is the workaround, not the answer.
 | **Forget After (min)** | integer, in | 60 | How long an untouched conversation survives; 0 means never. |
 | **Turns** | integer, out | | How many exchanges this conversation holds after this run — 0 when there is no conversation. |
 
-It also grows a second flow-in. **Ask** prompts; **Clear** forgets this node's conversation and
-publishes Turns 0 and Response `""` — a `/reset` command wired straight into the node that does the
-talking, validating nothing and contacting no server, so a reset from someone who has never spoken
-succeeds rather than failing on an empty Prompt. Ask stays first because a saved edge into the
-single unnamed flow-in this node used to have was recorded by position.
+**Context (tokens)** is optional and Ollama-only: it sends `num_ctx`, and blank leaves the server's
+own default alone. It is here because of what Ollama does when a prompt outgrows its context window
+— it drops the oldest tokens silently rather than failing — so a conversation loses its earliest
+turns, and the system prompt with them, and reads as a model that has become confused rather than
+one that was cut short. An OpenAI-compatible server is given its context size at launch, so the
+field does nothing there.
 
-**Two flow-ins on one node is the shape this repository split twice, and the distinction is which
-trigger drives them.** What races is *one* trigger fanned out to both: sibling flow edges run
-concurrently, the node fires once, and only the arrivals recorded by the time that firing starts are
-seen — so "clear, then ask" wired that way can silently drop the clear. A Clear driven by its own
-trigger is a different run entirely, which is the same reason Local LLM Server is allowed Start,
-Restart and Stop. Sequencing still belongs upstream (`trigger → Clear Conversation → Local LLM`),
-and both ports arriving anyway is handled in the only sensible order — forget, then ask — as a
-backstop rather than a wiring to rely on.
+The prompt node has **one** flow-in, **Ask**. See section 4a for the Clear port that briefly sat
+beside it and why it could not work.
+
+### 4a. The Clear port that did not work (v3.0.0)
+
+v3.0.0 put a **Clear** flow-in on the prompt node, so a `/reset` command could reset a conversation
+without a second node. It was wrong, and the reason is worth keeping.
+
+The objection considered at the time was the *race* — the shape Collect Items and Stored Value were
+split out of — and it genuinely did not apply: sibling edges race only when **one** trigger fans out
+to both ports, and a `/reset` command is its own trigger, hence its own run, the same way Local LLM
+Server is allowed Start, Restart and Stop.
+
+**The objection that mattered was the data source.** A data input takes at most one edge, so
+**Conversation ID** on the prompt node has exactly one source — the `/ask` command — and a reset
+arriving at the other port still resolved the id through *that* edge. So `/reset` cleared whoever
+last ran `/ask`, and cleared nothing at all when nobody had asked since the graph loaded. Driven
+through the real engine:
+
+```
+ask #1 (alice)   → turns=1
+ask #2 (alice)   → turns=2
+reset (bob)      → turns=0     ← bob's reset wiped alice's conversation
+```
+
+A clear has to read the id belonging to the run that triggered it, which means it needs an input of
+its own — which is the separate node. The port also emptied `Response` and fired the node's only
+flow-out, so a reset cascaded an empty message into whatever answered the prompt.
+
+**The lesson is about where a node's inputs come from, not about how its ports are named.** Two
+entry points on one node are fine when they need the same data (Start/Stop on the server node act on
+one command and one address). They are not fine when each entry point needs data belonging to its
+own trigger, because the inputs are shared and a data input has one source. `ConversationResetGraphTest`
+drives a real `NodeGraph` for exactly this reason: the bug was invisible to every test that called
+`process()` directly, and the node's own tests all passed.
 
 **Clear Conversation** (new, action, `llm.ClearConversationNode`) takes **Conversation ID**, publishes
 **Forgotten** (how many exchanges went with it) and **Found**, and has a flow-in and a flow-out. It
@@ -205,19 +233,18 @@ not.
 ## 5. What the Discord graph looks like
 
 ```
-Discord Slash Command /ask ──▶ Local LLM · Ask ──▶ Discord Reply
+Discord Slash Command /ask ──▶ Local LLM ──▶ Discord Reply
    question ─────────────────▶ Prompt
    Sender ID ────────────────▶ Conversation ID
-   Reply ───────────────────────────────────────▶ Reply
+   Reply ──────────────────────────────────▶ Reply
 
-Discord Slash Command /reset ─▶ Local LLM · Clear
+Discord Slash Command /reset ─▶ Clear Conversation ──▶ Discord Reply
    Sender ID ─────────────────▶ Conversation ID
 ```
 
-The reset goes into the same node's **Clear** port because it is its own command, and so its own
-run. Use **Clear Conversation** instead when one trigger must clear *and then* prompt, when the
-graph doing the resetting has no prompt node in it, or when you want **Forgotten** — how much was
-actually thrown away.
+**Each command's own Sender ID goes into the node that command triggers.** That is what makes each
+person reset their own conversation and nobody else's — and what section 4a's Clear port could not
+do, because it had to borrow the other command's id.
 
 Discord's three-second limit is already handled: `DiscordBot` defers every slash invocation, so the
 graph has about fifteen minutes to answer through the `Reply` handle, which is comfortably more than
@@ -253,9 +280,10 @@ Decided as built:
   **Conversation**, and the first question asked of it was "is that the identifier?" — which is the
   answer. Renaming a port breaks edges already wired to it (saved edges resolve by name, with no
   positional fallback), so it was worth a `#major` while nothing was wired and not worth one later.
-- **Clearing has two shapes**: a **Clear** flow-in on the prompt node for a reset with its own
-  trigger, and the **Clear Conversation** node for sequencing, for graphs with no prompt node, and
-  for seeing what was thrown away.
+- **Clearing lives on its own node**, for the reason in section 4a: it needs a **Conversation ID**
+  belonging to the run that triggered it, which a second port on the prompt node cannot have.
+- **Context (tokens)** exists because Ollama truncates silently, so a conversation degrades instead
+  of erroring.
 - **0 History Turns** turns memory off for one node without unwiring the name it was given — useful
   when two nodes share a conversation and only one of them should be writing to it.
 - **Ollama's endpoint** follows section 2a: `/api/generate` until there is a history, `/api/chat`
@@ -269,5 +297,6 @@ Still open:
   a bot people talk to daily, and it needs its own answer about where the text lands and who can
   read it.
 - **Token-aware trimming.** **History Turns** is a proxy for the context window because nothing here
-  can count tokens. A model with a small window still fails at the server rather than being trimmed
-  to fit.
+  can count tokens. **Context (tokens)** raises the window rather than measuring the history against
+  it, so a conversation can still outgrow whatever it is set to — silently, since that truncation is
+  the server's.

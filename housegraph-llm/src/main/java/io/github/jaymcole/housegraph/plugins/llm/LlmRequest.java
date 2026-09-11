@@ -32,12 +32,14 @@ import java.util.List;
  * @param conversational whether this prompt belongs to a conversation at all
  * @param prompt         what to ask
  * @param temperature    an optional sampling temperature; null leaves the server's default alone
+ * @param contextTokens  an optional context window in tokens ({@code num_ctx}, Ollama only); null
+ *                       or less than one leaves the server's own default alone
  * @param apiKey         an optional bearer token; null or blank sends no Authorization header
  * @param timeoutSeconds how long to wait for the whole answer, clamped to at least one second
  */
 public record LlmRequest(LlmApi api, String server, String model, String system,
                          List<LlmMessage> history, boolean conversational, String prompt,
-                         Float temperature, String apiKey, int timeoutSeconds) {
+                         Float temperature, Integer contextTokens, String apiKey, int timeoutSeconds) {
 
     public LlmRequest {
         api = api == null ? LlmApi.OLLAMA : api;
@@ -46,6 +48,9 @@ public record LlmRequest(LlmApi api, String server, String model, String system,
         apiKey = apiKey == null ? "" : apiKey.trim();
         history = history == null ? List.of() : List.copyOf(history);
         conversational = conversational || !history.isEmpty();
+        // A context window of zero or less is not a smaller window, it is a nonsense one: treat it
+        // as "unset" so the server's own default stands rather than sending a value it must reject.
+        contextTokens = contextTokens == null || contextTokens < 1 ? null : contextTokens;
         if (server.isEmpty()) {
             throw new LlmException("No LLM server address given (e.g. " + LocalLlmClient.DEFAULT_SERVER + ").");
         }
@@ -62,6 +67,7 @@ public record LlmRequest(LlmApi api, String server, String model, String system,
     /** A one-shot prompt, remembering nothing — the request this library sent before conversations existed. */
     public LlmRequest(LlmApi api, String server, String model, String system, String prompt,
                       Float temperature, String apiKey, int timeoutSeconds) {
-        this(api, server, model, system, List.of(), false, prompt, temperature, apiKey, timeoutSeconds);
+        this(api, server, model, system, List.of(), false, prompt, temperature, null, apiKey,
+                timeoutSeconds);
     }
 }

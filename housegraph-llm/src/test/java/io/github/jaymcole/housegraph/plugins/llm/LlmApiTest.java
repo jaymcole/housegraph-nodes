@@ -221,7 +221,7 @@ class LlmApiTest {
         // /api/generate/api/chat, which is a 404 built out of a correct address.
         LlmRequest typed = new LlmRequest(LlmApi.OLLAMA, "http://localhost:11434/api/generate", "llama3.2",
                 null, List.of(LlmMessage.user("hi"), LlmMessage.assistant("hello")), true, "and again",
-                null, null, 30);
+                null, null, null, 30);
         assertEquals("http://localhost:11434/api/chat", LlmApi.OLLAMA.endpoint(typed).toString());
         assertEquals("http://localhost:11434/api/tags",
                 LlmApi.OLLAMA.modelsEndpoint("http://localhost:11434/api/chat").toString());
@@ -241,7 +241,7 @@ class LlmApiTest {
     @Test
     void aNonEmptyHistoryIsAConversationWhateverItWasToldToBe() {
         LlmRequest saidOtherwise = new LlmRequest(LlmApi.OLLAMA, "http://localhost:11434", "llama3.2", null,
-                List.of(LlmMessage.user("hi"), LlmMessage.assistant("hello")), false, "again", null, null, 30);
+                List.of(LlmMessage.user("hi"), LlmMessage.assistant("hello")), false, "again", null, null, null, 30);
 
         assertTrue(saidOtherwise.conversational());
         assertEquals("http://localhost:11434/api/chat", LlmApi.OLLAMA.endpoint(saidOtherwise).toString());
@@ -289,12 +289,12 @@ class LlmApiTest {
     private static LlmRequest conversation(LlmApi api) {
         return new LlmRequest(api, "http://localhost:11434", "llama3.2", "Be brief.",
                 List.of(LlmMessage.user("Who wrote Dune?"), LlmMessage.assistant("Frank Herbert.")),
-                true, "Why is the sky blue?", null, null, 30);
+                true, "Why is the sky blue?", null, null, null, 30);
     }
 
     /** Turn one of a conversation: nothing said yet, but it is a conversation all the same. */
     private static LlmRequest firstTurn(LlmApi api) {
         return new LlmRequest(api, "http://localhost:11434", "llama3.2", null, List.of(), true,
-                "Who wrote Dune?", null, null, 30);
+                "Who wrote Dune?", null, null, null, 30);
     }
 }

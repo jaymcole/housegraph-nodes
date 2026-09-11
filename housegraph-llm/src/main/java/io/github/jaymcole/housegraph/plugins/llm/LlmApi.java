@@ -294,7 +294,12 @@ public enum LlmApi {
      * arrives as a run of newline-separated JSON objects that {@link #replyFrom} could not read.
      * A null or blank system prompt is left out entirely rather than sent as an empty string,
      * which some servers treat as "an empty system prompt" instead of "none", and a null
-     * temperature is left out so the server's own default stands.
+     * temperature or context window is left out so the server's own default stands.
+     * <p>
+     * <b>{@code num_ctx} is Ollama's alone.</b> It goes in {@code options} beside the temperature;
+     * an OpenAI-compatible server is given its context size at launch and has no request field for
+     * it, so a context window set against one is dropped rather than sent somewhere it would be
+     * ignored or rejected — see the Context (tokens) input's documentation on the prompt node.
      * <p>
      * <b>An Ollama request in a conversation is the {@code /api/chat} body</b> — a
      * {@code messages} array, like OpenAI's — and one outside any conversation is the
@@ -320,8 +325,15 @@ public enum LlmApi {
                         body.put("system", system);
                     }
                 }
+                JSONObject options = new JSONObject();
                 if (temperature != null) {
-                    body.put("options", new JSONObject().put("temperature", temperature.doubleValue()));
+                    options.put("temperature", temperature.doubleValue());
+                }
+                if (request.contextTokens() != null) {
+                    options.put("num_ctx", request.contextTokens().intValue());
+                }
+                if (!options.isEmpty()) {
+                    body.put("options", options);
                 }
             }
             case OPENAI -> {

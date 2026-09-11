@@ -89,7 +89,18 @@ import java.util.List;
  * <b>System Prompt</b> sets the standing instruction ("answer in one sentence", "you are a
  * doorbell"), which is the input worth reaching for when the answer is the right idea in the wrong
  * shape. <b>Temperature</b> is left to the server unless you set it: 0 for the most repeatable
- * answer, higher for a more varied one. <b>API Key</b> stays empty for a normal local server and
+ * answer, higher for a more varied one.
+ * <p>
+ * <b>Context (tokens)</b> is the one to reach for when a conversation answers worse the longer it
+ * gets. Ollama gives a model a default context window and <b>silently drops the oldest tokens</b>
+ * that do not fit rather than complaining — so a history grown past it loses its earliest turns, and
+ * the system prompt with them, which reads as a model that has become confused rather than one that
+ * was cut short. Setting this sends {@code num_ctx}; blank keeps the server's own default. It costs
+ * memory, so raise it to what the conversation needs rather than to the model's maximum. <b>It is
+ * Ollama-only</b>, like Pull Model: an OpenAI-compatible server is told its context size when it is
+ * launched (llama.cpp's {@code -c}) rather than per request, so the field does nothing there.
+ * <p>
+ * <b>API Key</b> stays empty for a normal local server and
  * exists for one started behind a token (llama.cpp's {@code --api-key}); it is marked secret, so
  * it is never written into a save file — wire a Secret Loader into it rather than typing it in.
  * <p>
@@ -129,14 +140,21 @@ public class LocalLlmPromptNode extends BaseNode {
     private final NodeVariable<String> server = new NodeVariable<>("Server", String.class, true).required();
     private final NodeVariable<String> api = new NodeVariable<>("API", String.class, true);
     private final NodeVariable<Float> temperature = new NodeVariable<>("Temperature", Float.class, true);
+    private final NodeVariable<Integer> contextTokens = new NodeVariable<>("Context (tokens)", Integer.class, true);
     private final NodeVariable<String> apiKey = new NodeVariable<>("API Key", String.class, true).markSecret();
     private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true);
 
     private final NodeVariable<String> response = new NodeVariable<>("Response", String.class);
     private final NodeVariable<Integer> turns = new NodeVariable<>("Turns", Integer.class);
 
+    /**
+     * <b>Named, though it is the only flow-in again.</b> The convention for a single-purpose
+     * flow-in is a bare anchor, and this port held one until it briefly had a Clear port beside it
+     * in v3.0.0. Going back to blank would drop the flow edge of every graph saved against that
+     * version — a blank-named port is referenced by position and a named one by name, and the name
+     * is what those saves recorded. Keeping it costs a label; changing it costs somebody's wiring.
+     */
     private final FlowPort ask = new FlowPort("Ask", FlowPort.Direction.IN);
-    private final FlowPort clear = new FlowPort("Clear", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 
     public LocalLlmPromptNode() {
@@ -170,14 +188,6 @@ public class LocalLlmPromptNode extends BaseNode {
      */
     @Override
     public void process(ProcessContext ctx) {
-        if (ctx.wasTriggeredVia(clear)) {
-            forget();
-            // Clear on its own is the whole run: /reset has no question behind it, and validating
-            // Prompt or asking the model anything here would fail a command that did its job.
-            if (!ctx.wasTriggeredVia(ask)) {
-                return;
-            }
-        }
         LlmConversation chat = conversation();
         int keep = historyTurns();
         List<LlmMessage> history = chat == null ? List.of() : chat.history(keep);
@@ -190,6 +200,7 @@ public class LocalLlmPromptNode extends BaseNode {
                 chat != null,
                 prompt.getValue(),
                 temperature.getValue(),
+                contextTokens.getValue(),
                 apiKey.getValue(),
                 timeoutSeconds());
         // The last cheap moment to notice a superseded or cancelled run: everything after this is
@@ -203,27 +214,6 @@ public class LocalLlmPromptNode extends BaseNode {
             chat.record(request.prompt(), reply, keep);
         }
         turns.setValue(chat == null ? 0 : chat.exchanges());
-    }
-
-    /**
-     * Forgets this node's conversation and publishes the emptied state: Turns 0, and Response back
-     * to {@code ""} rather than the answer left over from the last prompt, which a downstream node
-     * pulled after a reset would otherwise repeat as though it had just been said.
-     * <p>
-     * Nothing to forget is not a failure — a {@code /reset} from someone who has not said anything
-     * yet has done what was asked. Package-private so a test can exercise it without a live
-     * {@code NodeGraph}: the {@code ProcessContext} carrying "which port fired" can only be built
-     * by the engine, so the routing in {@link #process} is only observable in a running graph, but
-     * what it routes to is testable here — the same split {@code ClearCollectionNode} makes.
-     *
-     * @return true if there was a conversation to forget
-     */
-    boolean forget() {
-        String name = conversationId();
-        boolean forgotten = !name.isEmpty() && LlmConversations.shared().forget(name);
-        response.setValue("");
-        turns.setValue(0);
-        return forgotten;
     }
 
     /**
@@ -277,6 +267,7 @@ public class LocalLlmPromptNode extends BaseNode {
         addInput(server);
         addInput(api);
         addInput(temperature);
+        addInput(contextTokens);
         addInput(apiKey);
         addInput(timeout);
     }
@@ -287,15 +278,9 @@ public class LocalLlmPromptNode extends BaseNode {
         addOutput(turns);
     }
 
-    /**
-     * <b>Ask stays first.</b> A saved edge into a blank-named flow port is recorded by position, so
-     * the graphs that wired this node when it had one unnamed flow-in resolve to index 0 on load —
-     * which has to still be the port that prompts.
-     */
     @Override
     public void configureFlowInputs() {
         addFlowInput(ask);
-        addFlowInput(clear);
     }
 
     @Override
