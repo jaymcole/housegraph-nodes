@@ -17,13 +17,23 @@ import java.util.Locale;
  * <p>
  * <b>{@link #OLLAMA}</b> is Ollama's own {@code /api/generate}: model, prompt and an optional
  * system prompt as top-level fields, sampling settings under {@code options}, and the answer in
- * {@code response}.
+ * {@code response}. A prompt belonging to a conversation goes to {@code /api/chat} instead, which
+ * takes the same {@code messages} array as OpenAI and answers at {@code message.content} —
+ * {@code /api/generate} is one-shot by design and has nowhere to put what was said before.
+ * <p>
+ * <b>Only a conversation switches endpoints</b>, which is the whole reason the two paths are kept.
+ * {@code /api/chat} applies the model's chat template and {@code /api/generate} does not: for a
+ * chat-tuned model the two are near-equivalent, but for a base or completion model they are
+ * genuinely different calls. Sending every prompt to {@code /api/chat} would quietly change what
+ * existing graphs get back, so a prompt that is part of no conversation is still posted exactly
+ * where it was — and every turn of one that is, including the first, goes to the same endpoint as
+ * the rest of its conversation.
  * <p>
  * <b>{@link #OPENAI}</b> is OpenAI's {@code /v1/chat/completions}, which is what llama.cpp's
- * server, LM Studio, vLLM, LocalAI and text-generation-webui all expose. The prompt becomes a
- * one-turn conversation ({@code system} then {@code user}), and the answer is
- * {@code choices[0].message.content}. Ollama serves this endpoint too, so it is also the way to
- * point one graph at either server without rewiring.
+ * server, LM Studio, vLLM, LocalAI and text-generation-webui all expose. The prompt and anything
+ * said before it become the {@code messages} array ({@code system}, then the history, then the new
+ * {@code user} turn), and the answer is {@code choices[0].message.content}. Ollama serves this
+ * endpoint too, so it is also the way to point one graph at either server without rewiring.
  * <p>
  * <b>Which one to use is authored as text</b>, not picked from a dropdown, for the reason the Text
  * library spells out: only {@code String}, {@code Integer} and {@code Float} have registered value
@@ -33,7 +43,10 @@ import java.util.Locale;
  */
 public enum LlmApi {
 
-    /** Ollama's native {@code /api/generate}. The default: it is what "run an LLM locally" usually means. */
+    /**
+     * Ollama's native {@code /api/generate}, or {@code /api/chat} for a conversation. The default:
+     * it is what "run an LLM locally" usually means.
+     */
     OLLAMA("ollama", List.of("ollama")),
 
     /** OpenAI's {@code /v1/chat/completions}, as served by llama.cpp, LM Studio, vLLM, LocalAI and friends. */
@@ -117,6 +130,27 @@ public enum LlmApi {
     }
 
     /**
+     * The URL to POST {@code request} to: the same address as {@link #endpoint(String)}, except
+     * for an Ollama request belonging to a conversation, which goes to {@code /api/chat}. See the
+     * class documentation for why a one-shot prompt deliberately still goes to
+     * {@code /api/generate}.
+     * <p>
+     * The chat address is built from the {@link #root} rather than appended to what was typed, so
+     * a Server field someone pasted the prompt endpoint into ends up at {@code /api/chat} rather
+     * than at {@code /api/generate/api/chat}.
+     *
+     * @param request what is being sent
+     * @return the endpoint to POST it to
+     * @throws LlmException if the server is blank or is not a usable address
+     */
+    public URI endpoint(LlmRequest request) {
+        if (this != OLLAMA || !request.conversational()) {
+            return endpoint(request.server());
+        }
+        return uri(request.server(), root(request.server()) + "/api/chat");
+    }
+
+    /**
      * The URL to GET for the list of models this server has, and the readiness check that comes
      * with it: {@code /api/tags} for Ollama, {@code /v1/models} for an OpenAI-compatible server.
      * <p>
@@ -186,8 +220,13 @@ public enum LlmApi {
     String root(String server) {
         String base = baseUrl(server);
         String lower = base.toLowerCase(Locale.ROOT);
-        String suffix = this == OLLAMA ? "/api/generate" : "/chat/completions";
-        return lower.endsWith(suffix) ? base.substring(0, base.length() - suffix.length()) : base;
+        List<String> suffixes = this == OLLAMA ? List.of("/api/generate", "/api/chat") : List.of("/chat/completions");
+        for (String suffix : suffixes) {
+            if (lower.endsWith(suffix)) {
+                return base.substring(0, base.length() - suffix.length());
+            }
+        }
+        return base;
     }
 
     /**
@@ -249,13 +288,18 @@ public enum LlmApi {
     }
 
     /**
-     * This API's request body for one prompt.
+     * This API's request body for one prompt, with whatever was said before it.
      * <p>
      * Both bodies say {@code "stream": false}: Ollama streams by default, and a streamed answer
      * arrives as a run of newline-separated JSON objects that {@link #replyFrom} could not read.
      * A null or blank system prompt is left out entirely rather than sent as an empty string,
      * which some servers treat as "an empty system prompt" instead of "none", and a null
      * temperature is left out so the server's own default stands.
+     * <p>
+     * <b>An Ollama request in a conversation is the {@code /api/chat} body</b> — a
+     * {@code messages} array, like OpenAI's — and one outside any conversation is the
+     * {@code /api/generate} body it has always been. {@link #endpoint(LlmRequest)} makes the
+     * matching choice of address.
      *
      * @param request what to ask, and how
      * @return the JSON body to POST
@@ -268,21 +312,20 @@ public enum LlmApi {
         Float temperature = request.temperature();
         switch (this) {
             case OLLAMA -> {
-                body.put("prompt", request.prompt());
-                if (system != null && !system.isBlank()) {
-                    body.put("system", system);
+                if (request.conversational()) {
+                    body.put("messages", messages(request));
+                } else {
+                    body.put("prompt", request.prompt());
+                    if (system != null && !system.isBlank()) {
+                        body.put("system", system);
+                    }
                 }
                 if (temperature != null) {
                     body.put("options", new JSONObject().put("temperature", temperature.doubleValue()));
                 }
             }
             case OPENAI -> {
-                JSONArray messages = new JSONArray();
-                if (system != null && !system.isBlank()) {
-                    messages.put(new JSONObject().put("role", "system").put("content", system));
-                }
-                messages.put(new JSONObject().put("role", "user").put("content", request.prompt()));
-                body.put("messages", messages);
+                body.put("messages", messages(request));
                 if (temperature != null) {
                     body.put("temperature", temperature.doubleValue());
                 }
@@ -292,12 +335,39 @@ public enum LlmApi {
     }
 
     /**
+     * The conversation as both protocols' {@code messages} array: the system prompt if there is
+     * one, then what was already said, then the new turn.
+     * <p>
+     * <b>The system prompt is not part of the history</b>, so it is put back at the front on every
+     * call. That is what makes editing it on the node change the next answer rather than leaving
+     * the conversation bound to the instruction it was started under, and it is why trimming the
+     * history can never drop it.
+     */
+    private static JSONArray messages(LlmRequest request) {
+        JSONArray messages = new JSONArray();
+        String system = request.system();
+        if (system != null && !system.isBlank()) {
+            messages.put(new JSONObject().put("role", "system").put("content", system));
+        }
+        for (LlmMessage message : request.history()) {
+            messages.put(new JSONObject().put("role", message.role()).put("content", message.content()));
+        }
+        messages.put(new JSONObject().put("role", "user").put("content", request.prompt()));
+        return messages;
+    }
+
+    /**
      * The generated text out of a successful reply.
      * <p>
      * A model that answered with nothing gives {@code ""} — a text output in this repository is
      * never null — but a reply that does not have the field at all <b>throws</b>, because that is
      * not an empty answer: it is a server speaking a protocol other than the one selected, and
      * saying so beats handing an empty string downstream as though the model had shrugged.
+     * <p>
+     * <b>Ollama is read in either of its two shapes</b>, {@code response} from
+     * {@code /api/generate} and {@code message.content} from {@code /api/chat}, rather than the
+     * one the request happened to ask for. The reply is the same text either way, and a server
+     * that answered the other endpoint's shape is not a failure worth inventing.
      *
      * @param responseBody the server's response body
      * @return the generated text, never null
@@ -307,10 +377,14 @@ public enum LlmApi {
         JSONObject json = parseObject(responseBody);
         return switch (this) {
             case OLLAMA -> {
-                if (!json.has("response")) {
-                    throw new LlmException(missingField("response", responseBody));
+                if (json.has("response")) {
+                    yield json.optString("response", "");
                 }
-                yield json.optString("response", "");
+                JSONObject message = json.optJSONObject("message");
+                if (message == null || !message.has("content")) {
+                    throw new LlmException(missingField("response or message.content", responseBody));
+                }
+                yield message.optString("content", "");
             }
             case OPENAI -> {
                 JSONArray choices = json.optJSONArray("choices");

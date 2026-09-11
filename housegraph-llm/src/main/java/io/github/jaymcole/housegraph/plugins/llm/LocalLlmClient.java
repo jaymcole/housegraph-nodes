@@ -72,7 +72,7 @@ public final class LocalLlmClient {
      */
     public static String generate(LlmRequest request) {
         LlmApi api = request.api();
-        URI endpoint = api.endpoint(request.server());
+        URI endpoint = api.endpoint(request);
         HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint)
                 .timeout(Duration.ofSeconds(request.timeoutSeconds()))
                 .header("Content-Type", "application/json")
@@ -90,8 +90,9 @@ public final class LocalLlmClient {
         String reply = api.replyFrom(response.body());
         // The prompt and the answer are the user's, and can be long: log the shape of the call, not
         // its content. That is enough to tell "the model is slow" from "the node never ran".
-        log.debug("{} answered {} in {} ms with {} characters",
-                endpoint, request.model(), (System.nanoTime() - startedAt) / 1_000_000L, reply.length());
+        log.debug("{} answered {} in {} ms with {} characters, after {} remembered exchanges",
+                endpoint, request.model(), (System.nanoTime() - startedAt) / 1_000_000L, reply.length(),
+                request.history().size() / 2);
         return reply;
     }
 

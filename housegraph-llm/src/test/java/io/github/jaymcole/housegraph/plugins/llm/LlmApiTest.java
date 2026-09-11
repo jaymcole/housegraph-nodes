@@ -1,5 +1,6 @@
 package io.github.jaymcole.housegraph.plugins.llm;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
 
@@ -203,8 +204,97 @@ class LlmApiTest {
         assertEquals("(nothing)", LlmApi.excerpt("  "));
     }
 
+    @Test
+    void aConversationSendsOllamaToItsChatEndpointAndAPlainPromptDoesNot() {
+        assertEquals("http://localhost:11434/api/generate",
+                LlmApi.OLLAMA.endpoint(request(LlmApi.OLLAMA, null, null)).toString());
+        assertEquals("http://localhost:11434/api/chat",
+                LlmApi.OLLAMA.endpoint(conversation(LlmApi.OLLAMA)).toString());
+        // OpenAI has one endpoint for both: a conversation is just a longer messages array.
+        assertEquals("http://localhost:11434/v1/chat/completions",
+                LlmApi.OPENAI.endpoint(conversation(LlmApi.OPENAI)).toString());
+    }
+
+    @Test
+    void aServerFieldNamingAnOllamaEndpointStillLandsOnTheRightOne() {
+        // People paste whatever address they already had working. Appending to it would give
+        // /api/generate/api/chat, which is a 404 built out of a correct address.
+        LlmRequest typed = new LlmRequest(LlmApi.OLLAMA, "http://localhost:11434/api/generate", "llama3.2",
+                null, List.of(LlmMessage.user("hi"), LlmMessage.assistant("hello")), true, "and again",
+                null, null, 30);
+        assertEquals("http://localhost:11434/api/chat", LlmApi.OLLAMA.endpoint(typed).toString());
+        assertEquals("http://localhost:11434/api/tags",
+                LlmApi.OLLAMA.modelsEndpoint("http://localhost:11434/api/chat").toString());
+    }
+
+    @Test
+    void theFirstTurnOfAConversationGoesWhereTheRestOfItWill() {
+        // Otherwise turn one is chat-templated differently from turn two, and the first answer of
+        // every conversation is shaped by a different call than its successors.
+        assertEquals("http://localhost:11434/api/chat",
+                LlmApi.OLLAMA.endpoint(firstTurn(LlmApi.OLLAMA)).toString());
+        JSONObject body = new JSONObject(LlmApi.OLLAMA.requestBody(firstTurn(LlmApi.OLLAMA)));
+        assertEquals(1, body.getJSONArray("messages").length());
+        assertFalse(body.has("prompt"));
+    }
+
+    @Test
+    void aNonEmptyHistoryIsAConversationWhateverItWasToldToBe() {
+        LlmRequest saidOtherwise = new LlmRequest(LlmApi.OLLAMA, "http://localhost:11434", "llama3.2", null,
+                List.of(LlmMessage.user("hi"), LlmMessage.assistant("hello")), false, "again", null, null, 30);
+
+        assertTrue(saidOtherwise.conversational());
+        assertEquals("http://localhost:11434/api/chat", LlmApi.OLLAMA.endpoint(saidOtherwise).toString());
+    }
+
+    @Test
+    void aConversationBecomesAMessagesArrayInEitherApi() {
+        for (LlmApi api : List.of(LlmApi.OLLAMA, LlmApi.OPENAI)) {
+            JSONObject body = new JSONObject(api.requestBody(conversation(api)));
+            JSONArray messages = body.getJSONArray("messages");
+            assertEquals(4, messages.length(), api.label());
+            assertEquals("system", messages.getJSONObject(0).getString("role"));
+            assertEquals("user", messages.getJSONObject(1).getString("role"));
+            assertEquals("Who wrote Dune?", messages.getJSONObject(1).getString("content"));
+            assertEquals("assistant", messages.getJSONObject(2).getString("role"));
+            assertEquals("Frank Herbert.", messages.getJSONObject(2).getString("content"));
+            assertEquals("user", messages.getJSONObject(3).getString("role"));
+            assertEquals("Why is the sky blue?", messages.getJSONObject(3).getString("content"));
+            assertFalse(body.has("prompt"), api.label() + " should not also send a one-shot prompt");
+        }
+    }
+
+    @Test
+    void theSystemPromptLeadsEveryTurnRatherThanBeingPartOfTheHistory() {
+        // Editing System Prompt has to change the next answer; a conversation bound to the
+        // instruction it started under would be the alternative.
+        JSONObject body = new JSONObject(LlmApi.OLLAMA.requestBody(conversation(LlmApi.OLLAMA)));
+        assertEquals("Be brief.", body.getJSONArray("messages").getJSONObject(0).getString("content"));
+    }
+
+    @Test
+    void ollamaIsReadInEitherOfItsTwoReplyShapes() {
+        assertEquals("Rayleigh scattering.", LlmApi.OLLAMA.replyFrom(
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"Rayleigh scattering.\"},\"done\":true}"));
+        LlmException failure = assertThrows(LlmException.class, () -> LlmApi.OLLAMA.replyFrom("{\"done\":true}"));
+        assertTrue(failure.getMessage().contains("response or message.content"), failure.getMessage());
+    }
+
     private static LlmRequest request(LlmApi api, String system, Float temperature) {
         return new LlmRequest(api, "http://localhost:11434", "llama3.2", system, "Why is the sky blue?",
                 temperature, null, 30);
+    }
+
+    /** The same request, with one exchange already behind it. */
+    private static LlmRequest conversation(LlmApi api) {
+        return new LlmRequest(api, "http://localhost:11434", "llama3.2", "Be brief.",
+                List.of(LlmMessage.user("Who wrote Dune?"), LlmMessage.assistant("Frank Herbert.")),
+                true, "Why is the sky blue?", null, null, 30);
+    }
+
+    /** Turn one of a conversation: nothing said yet, but it is a conversation all the same. */
+    private static LlmRequest firstTurn(LlmApi api) {
+        return new LlmRequest(api, "http://localhost:11434", "llama3.2", null, List.of(), true,
+                "Who wrote Dune?", null, null, 30);
     }
 }
