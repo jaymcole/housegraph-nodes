@@ -129,12 +129,27 @@ hand-formatting role labels. It is the workaround, not the answer.
 
 | Port | Type | Default | Means |
 | --- | --- | --- | --- |
-| **Conversation** | text, in | *(blank)* | The name of the conversation to continue. Blank is today's behaviour exactly: one-shot, nothing remembered. |
+| **Conversation ID** | text, in | *(blank)* | The id of the conversation to continue. Blank is today's behaviour exactly: one-shot, nothing remembered. |
 | **History Turns** | integer, in | 8 | How many previous exchanges to re-send. |
 | **Forget After (min)** | integer, in | 60 | How long an untouched conversation survives; 0 means never. |
 | **Turns** | integer, out | | How many exchanges this conversation holds after this run — 0 when there is no conversation. |
 
-**Clear Conversation** (new, action, `llm.ClearConversationNode`) takes **Conversation**, publishes
+It also grows a second flow-in. **Ask** prompts; **Clear** forgets this node's conversation and
+publishes Turns 0 and Response `""` — a `/reset` command wired straight into the node that does the
+talking, validating nothing and contacting no server, so a reset from someone who has never spoken
+succeeds rather than failing on an empty Prompt. Ask stays first because a saved edge into the
+single unnamed flow-in this node used to have was recorded by position.
+
+**Two flow-ins on one node is the shape this repository split twice, and the distinction is which
+trigger drives them.** What races is *one* trigger fanned out to both: sibling flow edges run
+concurrently, the node fires once, and only the arrivals recorded by the time that firing starts are
+seen — so "clear, then ask" wired that way can silently drop the clear. A Clear driven by its own
+trigger is a different run entirely, which is the same reason Local LLM Server is allowed Start,
+Restart and Stop. Sequencing still belongs upstream (`trigger → Clear Conversation → Local LLM`),
+and both ports arriving anyway is handled in the only sensible order — forget, then ask — as a
+backstop rather than a wiring to rely on.
+
+**Clear Conversation** (new, action, `llm.ClearConversationNode`) takes **Conversation ID**, publishes
 **Forgotten** (how many exchanges went with it) and **Found**, and has a flow-in and a flow-out. It
 forgets that conversation when flow arrives; being pulled for data answers whether there is one and
 changes nothing — the rule `ClearStoredValueNode` and `ClearCollectionNode` both follow, because a
@@ -190,14 +205,19 @@ not.
 ## 5. What the Discord graph looks like
 
 ```
-Discord Slash Command /ask ──▶ Local LLM ──▶ Discord Reply
+Discord Slash Command /ask ──▶ Local LLM · Ask ──▶ Discord Reply
    question ─────────────────▶ Prompt
-   Sender ID ────────────────▶ Conversation
-   Reply ──────────────────────────────────▶ Reply
+   Sender ID ────────────────▶ Conversation ID
+   Reply ───────────────────────────────────────▶ Reply
 
-Discord Slash Command /reset ─▶ Clear Conversation ──▶ Discord Reply
-   Sender ID ─────────────────▶ Conversation
+Discord Slash Command /reset ─▶ Local LLM · Clear
+   Sender ID ─────────────────▶ Conversation ID
 ```
+
+The reset goes into the same node's **Clear** port because it is its own command, and so its own
+run. Use **Clear Conversation** instead when one trigger must clear *and then* prompt, when the
+graph doing the resetting has no prompt node in it, or when you want **Forgotten** — how much was
+actually thrown away.
 
 Discord's three-second limit is already handled: `DiscordBot` defers every slash invocation, so the
 graph has about fifteen minutes to answer through the `Reply` handle, which is comfortably more than
@@ -229,7 +249,13 @@ Decided as built:
 
 - **Defaults** are 8 exchanges and 60 minutes. Both are ports, so a graph that wants yesterday's
   conversation back sets **Forget After (min)** to 0 and resets deliberately instead.
-- **Port naming** is **Conversation**, which reads as the same thing on both nodes.
+- **Port naming** is **Conversation ID** on both nodes. It shipped for a few minutes as
+  **Conversation**, and the first question asked of it was "is that the identifier?" — which is the
+  answer. Renaming a port breaks edges already wired to it (saved edges resolve by name, with no
+  positional fallback), so it was worth a `#major` while nothing was wired and not worth one later.
+- **Clearing has two shapes**: a **Clear** flow-in on the prompt node for a reset with its own
+  trigger, and the **Clear Conversation** node for sequencing, for graphs with no prompt node, and
+  for seeing what was thrown away.
 - **0 History Turns** turns memory off for one node without unwiring the name it was given — useful
   when two nodes share a conversation and only one of them should be writing to it.
 - **Ollama's endpoint** follows section 2a: `/api/generate` until there is a history, `/api/chat`

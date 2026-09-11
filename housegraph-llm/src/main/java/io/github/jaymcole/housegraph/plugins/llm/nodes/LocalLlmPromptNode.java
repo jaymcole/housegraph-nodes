@@ -45,25 +45,39 @@ import java.util.List;
  * node's settings if the server is genuinely able to batch.
  *
  * <h2>Remembering a conversation</h2>
- * <b>Left alone, every run is turn one.</b> Name a conversation in <b>Conversation</b> and the node
- * remembers instead: what was asked and what came back are kept under that name, and the next
+ * <b>Left alone, every run is turn one.</b> Name a conversation in <b>Conversation ID</b> and the
+ * node remembers instead: what was asked and what came back are kept under that name, and the next
  * prompt naming it is sent with them. Blank — the default — is the behaviour this node has always
  * had, one question at a time with nothing carried over, and it deliberately does not mean "one
  * shared conversation for everybody": an unwired field must not put every user of a bot into the
  * same conversation with each other.
  * <p>
- * <b>The name is the graph's choice, and that is the point.</b> A Discord slash command's Sender ID
+ * <b>The id is the graph's choice, and that is the point.</b> A Discord slash command's Sender ID
  * gives each person their own conversation across every channel; a channel id gives one shared
  * conversation in a room; Format Text composes anything else. This node knows nothing about Discord
- * and does not need to. Any node naming the same conversation shares it — two Local LLM nodes, or a
- * {@link ClearConversationNode} wired into a {@code /reset} command, with no edge between them (see
- * {@link LlmConversations}).
+ * and does not need to. Any node naming the same id shares that conversation — two Local LLM nodes,
+ * or a {@link ClearConversationNode}, with no edge between them (see {@link LlmConversations}).
+ * <p>
+ * <b>Two flow-ins, told apart:</b> <b>Ask</b> prompts the model, and <b>Clear</b> forgets this
+ * node's conversation without asking anything — a {@code /reset} command wired straight into the
+ * node that does the talking. A Clear run publishes Turns 0 and Response {@code ""}, validates
+ * nothing, and contacts no server, so a reset from someone who has never said anything is a
+ * success rather than an empty-Prompt failure.
+ * <p>
+ * <b>Do not fan one trigger out to both ports.</b> Sibling flow edges run concurrently and this
+ * node fires once, so "clear, then ask" wired that way races: only the arrivals recorded by the
+ * time the firing starts are seen, and the clear can be silently dropped (the reason Collect Items
+ * and Stored Value were split — see {@link ClearConversationNode}). Sequencing needs the clear to
+ * be <em>upstream</em>: trigger &rarr; {@link ClearConversationNode} &rarr; this node, under the
+ * same id. Clear is for a trigger of its own, the way Start and Stop are on the server node; both
+ * arriving together anyway is handled in the only order that makes sense — forget, then ask — but
+ * that is a backstop, not a wiring to rely on.
  * <p>
  * <b>History Turns</b> is how many previous exchanges are re-sent and kept, most recent first to
  * go; it is a rough stand-in for the model's context window, which is measured in tokens this
  * library cannot count, so a very long history against a small model still fails at the server.
  * <b>Forget After (min)</b> drops a conversation nobody has continued for that long — 0 keeps it
- * for as long as HouseGraph runs. <b>Turns</b> reports how many exchanges the conversation holds
+ * for as long as HouseGraph runs, leaving Clear as the only thing that ends it. <b>Turns</b> reports how many exchanges the conversation holds
  * after this run, and is 0 when none is named.
  * <p>
  * <b>Nothing is remembered across a restart</b>, and nothing is written to the save file: a graph
@@ -108,7 +122,7 @@ public class LocalLlmPromptNode extends BaseNode {
 
     private final NodeVariable<String> prompt = new NodeVariable<>("Prompt", String.class, true).required();
     private final NodeVariable<String> system = new NodeVariable<>("System Prompt", String.class, true);
-    private final NodeVariable<String> conversation = new NodeVariable<>("Conversation", String.class, true);
+    private final NodeVariable<String> conversation = new NodeVariable<>("Conversation ID", String.class, true);
     private final NodeVariable<Integer> historyTurns = new NodeVariable<>("History Turns", Integer.class, true);
     private final NodeVariable<Integer> forgetAfter = new NodeVariable<>("Forget After (min)", Integer.class, true);
     private final NodeVariable<String> model = new NodeVariable<>("Model", String.class, true).required();
@@ -121,7 +135,8 @@ public class LocalLlmPromptNode extends BaseNode {
     private final NodeVariable<String> response = new NodeVariable<>("Response", String.class);
     private final NodeVariable<Integer> turns = new NodeVariable<>("Turns", Integer.class);
 
-    private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
+    private final FlowPort ask = new FlowPort("Ask", FlowPort.Direction.IN);
+    private final FlowPort clear = new FlowPort("Clear", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 
     public LocalLlmPromptNode() {
@@ -155,6 +170,14 @@ public class LocalLlmPromptNode extends BaseNode {
      */
     @Override
     public void process(ProcessContext ctx) {
+        if (ctx.wasTriggeredVia(clear)) {
+            forget();
+            // Clear on its own is the whole run: /reset has no question behind it, and validating
+            // Prompt or asking the model anything here would fail a command that did its job.
+            if (!ctx.wasTriggeredVia(ask)) {
+                return;
+            }
+        }
         LlmConversation chat = conversation();
         int keep = historyTurns();
         List<LlmMessage> history = chat == null ? List.of() : chat.history(keep);
@@ -183,17 +206,43 @@ public class LocalLlmPromptNode extends BaseNode {
     }
 
     /**
+     * Forgets this node's conversation and publishes the emptied state: Turns 0, and Response back
+     * to {@code ""} rather than the answer left over from the last prompt, which a downstream node
+     * pulled after a reset would otherwise repeat as though it had just been said.
+     * <p>
+     * Nothing to forget is not a failure — a {@code /reset} from someone who has not said anything
+     * yet has done what was asked. Package-private so a test can exercise it without a live
+     * {@code NodeGraph}: the {@code ProcessContext} carrying "which port fired" can only be built
+     * by the engine, so the routing in {@link #process} is only observable in a running graph, but
+     * what it routes to is testable here — the same split {@code ClearCollectionNode} makes.
+     *
+     * @return true if there was a conversation to forget
+     */
+    boolean forget() {
+        String name = conversationId();
+        boolean forgotten = !name.isEmpty() && LlmConversations.shared().forget(name);
+        response.setValue("");
+        turns.setValue(0);
+        return forgotten;
+    }
+
+    /**
      * The conversation this run belongs to, or null when none is named — the one-shot behaviour
      * this node had before conversations existed. A name is trimmed, so a field holding spaces is
      * blank rather than a conversation called " ".
      */
     private LlmConversation conversation() {
-        String name = conversation.getValue();
-        String trimmed = name == null ? "" : name.trim();
-        if (trimmed.isEmpty() || historyTurns() <= 0) {
+        String name = conversationId();
+        if (name.isEmpty() || historyTurns() <= 0) {
             return null;
         }
-        return LlmConversations.shared().get(trimmed, forgetAfterMinutes());
+        return LlmConversations.shared().get(name, forgetAfterMinutes());
+    }
+
+    /** The authored conversation, trimmed — a field holding spaces names nothing rather than " ". */
+    private String conversationId() {
+        String name = conversation.getValue();
+        return name == null ? "" : name.trim();
     }
 
     /**
@@ -238,9 +287,15 @@ public class LocalLlmPromptNode extends BaseNode {
         addOutput(turns);
     }
 
+    /**
+     * <b>Ask stays first.</b> A saved edge into a blank-named flow port is recorded by position, so
+     * the graphs that wired this node when it had one unnamed flow-in resolve to index 0 on load —
+     * which has to still be the port that prompts.
+     */
     @Override
     public void configureFlowInputs() {
-        addFlowInput(in);
+        addFlowInput(ask);
+        addFlowInput(clear);
     }
 
     @Override

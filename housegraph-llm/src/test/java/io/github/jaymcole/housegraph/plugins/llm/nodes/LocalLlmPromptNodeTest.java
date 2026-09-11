@@ -3,6 +3,7 @@ package io.github.jaymcole.housegraph.plugins.llm.nodes;
 import com.sun.net.httpserver.HttpServer;
 import io.github.jaymcole.housegraph.graph.FlowPort;
 import io.github.jaymcole.housegraph.graph.NodeVariable;
+import io.github.jaymcole.housegraph.plugins.llm.LlmConversations;
 import io.github.jaymcole.housegraph.plugins.llm.LlmException;
 import io.github.jaymcole.housegraph.plugins.llm.LocalLlmClient;
 import org.json.JSONArray;
@@ -41,10 +42,13 @@ class LocalLlmPromptNodeTest {
     void itHasThePortsItsDocumentationDescribes() {
         LocalLlmPromptNode node = new LocalLlmPromptNode();
 
-        assertEquals(List.of("Prompt", "System Prompt", "Conversation", "History Turns", "Forget After (min)",
-                "Model", "Server", "API", "Temperature", "API Key", "Timeout (s)"), Nodes.inputNames(node));
+        assertEquals(List.of("Prompt", "System Prompt", "Conversation ID", "History Turns",
+                        "Forget After (min)", "Model", "Server", "API", "Temperature", "API Key", "Timeout (s)"),
+                Nodes.inputNames(node));
         assertEquals(List.of("Response", "Turns"), Nodes.outputNames(node));
-        assertEquals(1, node.getFlowInputs().size());
+        // Ask first: a saved edge into the single unnamed flow-in this node used to have was
+        // recorded by position, so index 0 has to still be the port that prompts.
+        assertEquals(List.of("Ask", "Clear"), Nodes.flowInputNames(node));
         assertEquals(1, node.getFlowOutputs().size());
         assertEquals(FlowPort.Direction.IN, node.getFlowInputs().get(0).direction);
     }
@@ -137,7 +141,7 @@ class LocalLlmPromptNodeTest {
     void aNamedConversationSendsWhatWasAlreadySaid() throws IOException {
         String address = serve("{\"message\":{\"role\":\"assistant\",\"content\":\"Frank Herbert.\"},\"done\":true}");
         LocalLlmPromptNode node = prompting(address, "Who wrote Dune?");
-        Nodes.set(node, "Conversation", aConversation());
+        Nodes.set(node, "Conversation ID", aConversation());
 
         Nodes.run(node);
         assertEquals("/api/chat", paths.get(0), "turn one belongs to the conversation as much as turn two");
@@ -158,9 +162,9 @@ class LocalLlmPromptNodeTest {
         String address = serve("{\"message\":{\"content\":\"Frank Herbert.\"},\"done\":true}");
         String name = aConversation();
         LocalLlmPromptNode asked = prompting(address, "Who wrote Dune?");
-        Nodes.set(asked, "Conversation", name);
+        Nodes.set(asked, "Conversation ID", name);
         LocalLlmPromptNode followingUp = prompting(address, "What else did he write?");
-        Nodes.set(followingUp, "Conversation", name);
+        Nodes.set(followingUp, "Conversation ID", name);
 
         Nodes.run(asked);
         Nodes.run(followingUp);
@@ -173,7 +177,7 @@ class LocalLlmPromptNodeTest {
     void historyTurnsCapsWhatIsCarriedForward() throws IOException {
         String address = serve("{\"message\":{\"content\":\"ok\"},\"done\":true}");
         LocalLlmPromptNode node = prompting(address, "one");
-        Nodes.set(node, "Conversation", aConversation());
+        Nodes.set(node, "Conversation ID", aConversation());
         Nodes.set(node, "History Turns", 1);
 
         Nodes.run(node);
@@ -190,7 +194,7 @@ class LocalLlmPromptNodeTest {
     void zeroHistoryTurnsRemembersNothingWithoutUnwiringTheName() throws IOException {
         String address = serve("{\"response\":\"ok\",\"done\":true}");
         LocalLlmPromptNode node = prompting(address, "one");
-        Nodes.set(node, "Conversation", aConversation());
+        Nodes.set(node, "Conversation ID", aConversation());
         Nodes.set(node, "History Turns", 0);
 
         Nodes.run(node);
@@ -206,7 +210,7 @@ class LocalLlmPromptNodeTest {
         String address = serve("{\"response\":\"first answer\",\"done\":true}");
         String name = aConversation();
         LocalLlmPromptNode node = prompting(address, "Who wrote Dune?");
-        Nodes.set(node, "Conversation", name);
+        Nodes.set(node, "Conversation ID", name);
         Nodes.run(node);
 
         // The server goes away between the two runs: the second prompt fails, and the exchange it
@@ -217,8 +221,51 @@ class LocalLlmPromptNodeTest {
         assertThrows(LlmException.class, () -> Nodes.run(node));
 
         ClearConversationNode clear = new ClearConversationNode();
-        Nodes.set(clear, "Conversation", name);
+        Nodes.set(clear, "Conversation ID", name);
         assertEquals(1, clear.forget(name), "only the exchange that succeeded is remembered");
+    }
+
+    @Test
+    void clearingForgetsThisNodesConversationAndEmptiesWhatItPublished() throws IOException {
+        String address = serve("{\"message\":{\"content\":\"Frank Herbert.\"},\"done\":true}");
+        String name = aConversation();
+        LocalLlmPromptNode node = prompting(address, "Who wrote Dune?");
+        Nodes.set(node, "Conversation ID", name);
+        Nodes.run(node);
+        assertEquals(1, (Integer) Nodes.get(node, "Turns"));
+
+        assertTrue(node.forget());
+
+        assertEquals(0, (Integer) Nodes.get(node, "Turns"));
+        // Not the answer left over from the last prompt: a Reply pulled after a reset would
+        // otherwise repeat it as though it had just been said.
+        assertEquals("", Nodes.get(node, "Response"));
+        assertTrue(LlmConversations.shared().peek(name).isEmpty());
+    }
+
+    @Test
+    void clearingSomethingNobodyStartedIsNotAFailure() {
+        // /reset from someone who has not said anything yet, and a node with no id at all.
+        LocalLlmPromptNode named = new LocalLlmPromptNode();
+        Nodes.set(named, "Conversation ID", aConversation());
+        assertFalse(named.forget());
+        assertFalse(new LocalLlmPromptNode().forget());
+    }
+
+    @Test
+    void clearingReachesTheSameConversationTheClearNodeDoes() {
+        // The id is the whole connection: no edge, and it does not matter which node does the
+        // forgetting.
+        String name = aConversation();
+        LocalLlmPromptNode node = new LocalLlmPromptNode();
+        Nodes.set(node, "Conversation ID", name);
+        LlmConversations.shared().get(name, 60).record("Who wrote Dune?", "Frank Herbert.", 8);
+
+        ClearConversationNode clear = new ClearConversationNode();
+        Nodes.set(clear, "Conversation ID", name);
+        assertEquals(1, clear.forget(name));
+
+        assertFalse(node.forget(), "the Clear node already took it");
     }
 
     /** A node pointed at {@code address} with {@code question} on its Prompt input. */
