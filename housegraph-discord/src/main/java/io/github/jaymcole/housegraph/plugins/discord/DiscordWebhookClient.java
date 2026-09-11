@@ -15,8 +15,9 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * One POST to a Discord <a href="https://discord.com/developers/docs/resources/webhook">webhook</a>
- * URL. This is the plain-HTTP side of talking to Discord — no bot login, no gateway, no
+ * A POST to a Discord <a href="https://discord.com/developers/docs/resources/webhook">webhook</a>
+ * URL — or, for content too long for one Discord message, one POST per piece it was split into.
+ * This is the plain-HTTP side of talking to Discord — no bot login, no gateway, no
  * {@code housegraph-discord}-wide connection to share — so unlike {@link DiscordBot} it needs
  * nothing wired in beyond the webhook URL itself and posts synchronously, the same shape as this
  * repository's other direct-HTTP clients ({@code LocalLlmClient}, {@code ReolinkClient}).
@@ -62,6 +63,11 @@ public final class DiscordWebhookClient {
      * above. With any, Discord requires {@code multipart/form-data} — the message becomes a
      * {@code payload_json} part and each file a {@code files[n]} part — so the two shapes are
      * built by {@link DiscordMultipart} and chosen between here.
+     * <p>
+     * <b>Content longer than one Discord message is posted as several</b>, in order, rather than
+     * rejected — see {@link DiscordMessages}. Each is its own POST, so a later one failing leaves
+     * the earlier ones posted; the alternative is a length nobody wired the graph for failing the
+     * whole send.
      *
      * @param webhookUrl     the full webhook URL Discord issued
      * @param content        the message text
@@ -75,6 +81,26 @@ public final class DiscordWebhookClient {
      */
     public static void send(String webhookUrl, String content, String username, String avatarUrl,
                             int timeoutSeconds, List<DiscordAttachment> attachments) {
+        URI uri;
+        try {
+            uri = URI.create(webhookUrl);
+        } catch (IllegalArgumentException e) {
+            throw new DiscordWebhookException("The Webhook URL is not a valid URL.", e);
+        }
+
+        // Text longer than one Discord message becomes several posts rather than a rejected
+        // request; see DiscordMessages. They go out in order because each POST is awaited, and the
+        // files ride the first one, where they were always going to be.
+        List<String> messages = DiscordMessages.split(content);
+        for (int i = 0; i < messages.size(); i++) {
+            post(uri, messages.get(i), username, avatarUrl, timeoutSeconds,
+                    i == 0 ? attachments : List.of());
+        }
+    }
+
+    /** One POST: the message body, in whichever wire format {@code attachments} calls for. */
+    private static void post(URI uri, String content, String username, String avatarUrl,
+                             int timeoutSeconds, List<DiscordAttachment> attachments) {
         JSONObject body = new JSONObject();
         body.put("content", content);
         if (username != null && !username.isBlank()) {
@@ -92,13 +118,6 @@ public final class DiscordWebhookClient {
                 declared.put(new JSONObject().put("id", i).put("filename", attachments.get(i).name()));
             }
             body.put("attachments", declared);
-        }
-
-        URI uri;
-        try {
-            uri = URI.create(webhookUrl);
-        } catch (IllegalArgumentException e) {
-            throw new DiscordWebhookException("The Webhook URL is not a valid URL.", e);
         }
 
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)

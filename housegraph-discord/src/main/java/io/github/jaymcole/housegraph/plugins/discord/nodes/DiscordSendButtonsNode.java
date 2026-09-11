@@ -38,6 +38,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * plain {@code ""} flow-out that fires immediately once the message is sent. A button's label
  * doubles as its id, so no separate id field is needed.
  * <p>
+ * A {@code Message} longer than Discord accepts (2000 characters) is posted as several messages,
+ * with the buttons on the last one — where the reader ends up, rather than above text they have
+ * yet to read (see {@link io.github.jaymcole.housegraph.plugins.discord.DiscordMessages}).
+ * <p>
  * Wire a Discord Bot node's {@code Bot} output into this node's {@code Bot} input; the click
  * subscription follows that wire, same as the Discord Command node. Editing {@code Buttons}
  * rebuilds this node's flow-out ports (edges to surviving labels reconnect by name). Because

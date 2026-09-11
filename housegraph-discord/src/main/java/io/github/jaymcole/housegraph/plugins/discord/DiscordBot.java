@@ -231,6 +231,11 @@ public final class DiscordBot {
      * Posts {@code text} with {@code buttons} and {@code attachments}; a no-op if not connected
      * or the channel isn't found.
      * <p>
+     * <b>Text too long for one Discord message is posted as several</b>, in order, rather than
+     * failing the send: what a graph posts is usually something another node produced, and its
+     * length is neither chosen nor visible to whoever wired the graph. See {@link DiscordMessages}
+     * for where it is cut, and {@code post} below for what rides which message.
+     * <p>
      * The uploads are opened here and handed to JDA, which closes them once the request has been
      * sent — including when it fails, which is why nothing below closes them itself. A file that
      * cannot be opened at all fails before anything is sent, so a message never arrives claiming
@@ -250,19 +255,48 @@ public final class DiscordBot {
                     + "(check the channel id, and that the bot has been invited to the server and can see the channel)", channelId);
             return;
         }
-        MessageCreateAction action = channel.sendMessage(text);
+        List<String> messages = DiscordMessages.split(text);
+        MessageCreateAction action = channel.sendMessage(messages.get(0));
         if (!attachments.isEmpty()) {
+            // Attachments ride the first message: opening them here, before anything has been
+            // sent, is what makes an unreadable file fail the send rather than leave a message
+            // behind claiming a picture that never went with it.
             action = action.setFiles(DiscordUploads.open(attachments));
         }
-        if (!buttons.isEmpty()) {
+        post(channel, action, messages, 0, buttons, channelId);
+    }
+
+    /**
+     * Queues {@code action} — which carries {@code messages[index]} — and, once Discord has taken
+     * it, the messages after it.
+     * <p>
+     * <b>One at a time, each from the last one's completion</b>, because JDA promises nothing
+     * about the order two independent requests finish in, and half an answer arriving before the
+     * half that precedes it is worse than an answer that takes a moment longer.
+     * <p>
+     * <b>The buttons go on the last message</b>, unlike the attachments: they are what the reader
+     * is being asked to answer with, and a row of them sitting above several screens of text is a
+     * row nobody scrolls back to. They stay on one message either way, so a click still disables
+     * exactly the set that was clicked.
+     */
+    private void post(MessageChannel channel, MessageCreateAction action, List<String> messages,
+                      int index, List<DiscordButtonSpec> buttons, String channelId) {
+        MessageCreateAction request = action;
+        if (!buttons.isEmpty() && index == messages.size() - 1) {
             List<Button> jdaButtons = new ArrayList<>();
             for (DiscordButtonSpec button : buttons) {
                 jdaButtons.add(Button.primary(button.id(), button.label()));
             }
-            action = action.addActionRow(jdaButtons);
+            request = request.addActionRow(jdaButtons);
         }
-        action.queue(
-                sent -> log.info("Sent message {} to channel \"{}\"", sent.getId(), channelId),
+        int next = index + 1;
+        request.queue(
+                sent -> {
+                    log.info("Sent message {} to channel \"{}\"", sent.getId(), channelId);
+                    if (next < messages.size()) {
+                        post(channel, channel.sendMessage(messages.get(next)), messages, next, buttons, channelId);
+                    }
+                },
                 failure -> log.error("Discord rejected the message to channel \"{}\": {}", channelId, failure.getMessage()));
     }
 

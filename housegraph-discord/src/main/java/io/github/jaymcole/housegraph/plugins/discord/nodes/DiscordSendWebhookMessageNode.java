@@ -30,6 +30,10 @@ import java.util.List;
  * {@code Username} and {@code Avatar URL} are optional per-message overrides of the webhook's
  * own configured name/avatar; leave either blank to use what the webhook is already set to.
  * <p>
+ * A {@code Message} longer than Discord accepts (2000 characters) is posted as several messages,
+ * in order, rather than failing the node — see
+ * {@link io.github.jaymcole.housegraph.plugins.discord.DiscordMessages}.
+ * <p>
  * A failure — an invalid or deleted webhook, an unreachable URL, a request Discord rejects —
  * fails the node rather than silently doing nothing, so it shows up on the canvas instead of
  * disappearing (see {@link DiscordWebhookClient}).

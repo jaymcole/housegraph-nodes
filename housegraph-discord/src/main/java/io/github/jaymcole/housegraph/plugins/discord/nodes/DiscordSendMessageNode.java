@@ -23,6 +23,10 @@ import java.util.List;
  * in the channel the command came from, or type a fixed channel id for a set destination.
  * Control flows through, so you can chain more work after sending.
  * <p>
+ * A {@code Message} longer than Discord accepts (2000 characters) is posted as several messages,
+ * in order, rather than failing the node — see
+ * {@link io.github.jaymcole.housegraph.plugins.discord.DiscordMessages}.
+ * <p>
  * {@code Bot} is read via the normal {@code botInput.getValue()} pull, not captured eagerly
  * through {@code onInputEdgeAdded} — this node only needs the current value at the moment it
  * sends, and that hook's callback is dispatched asynchronously (and, for an edge restored from
