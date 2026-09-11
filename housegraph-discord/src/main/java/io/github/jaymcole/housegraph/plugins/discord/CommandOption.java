@@ -3,6 +3,7 @@ package io.github.jaymcole.housegraph.plugins.discord;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * One declared slash-command option: its (lowercase) {@code name}, its {@link DiscordOptionType},
@@ -24,6 +25,14 @@ import java.util.List;
  */
 public record CommandOption(String name, DiscordOptionType type, List<String> choices, ChoiceMode choiceMode) {
 
+    /**
+     * What Discord accepts as a command or option name, mirrored from the check JDA makes at
+     * registration: word characters and dashes, at most the 32 Discord allows. Mirrored rather
+     * than left to JDA because JDA's check throws, and a throw at registration time costs the
+     * whole command — every other option with it — over one bad name.
+     */
+    private static final Pattern VALID_NAME = Pattern.compile("[\\w-]{1,32}", Pattern.UNICODE_CHARACTER_CLASS);
+
     public CommandOption {
         choices = normalize(choices);
         if (choiceMode == null) {
@@ -33,6 +42,16 @@ public record CommandOption(String name, DiscordOptionType type, List<String> ch
             choices = List.of();
             choiceMode = ChoiceMode.FREE;
         }
+    }
+
+    /**
+     * Whether Discord would accept {@code name} for a command or an option. Callers check this
+     * where a name is <em>read in</em> — from saved state or from the node's own editor — so a
+     * name Discord could never take is dropped, with a warning, at the point someone can still
+     * connect it to what they typed or to the graph they loaded.
+     */
+    public static boolean isValidName(String name) {
+        return name != null && VALID_NAME.matcher(name).matches();
     }
 
     /** An option with no choice list: any value of its type. */

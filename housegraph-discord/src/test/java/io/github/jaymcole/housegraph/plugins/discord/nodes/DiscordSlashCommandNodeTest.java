@@ -29,7 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>
  * Also that what a saved graph holds survives a round trip — including an option's values and
  * whether they restrict or merely suggest, which a graph saved before those existed doesn't
- * carry at all.
+ * carry at all — and that the round trip holds in both directions across versions of this
+ * library: a graph saved today has to load on a build that predates the JSON option format,
+ * because one that couldn't read it split it on commas into option names Discord refuses, and
+ * refusing an option name used to take every slash command in the graph down with it.
  */
 class DiscordSlashCommandNodeTest {
 
@@ -114,10 +117,44 @@ class DiscordSlashCommandNodeTest {
     }
 
     @Test
+    void aGraphSavedTodayStillLoadsOnABuildThatPredatesTheJsonFormat() {
+        DiscordSlashCommandNode saved = new DiscordSlashCommandNode();
+        saved.loadState(Map.of("command", "deploy", "optionsJson",
+                "[{\"name\":\"env\",\"type\":\"text\",\"values\":[\"prod\",\"staging, eu\"],\"mode\":\"restricted\"},"
+                        + "{\"name\":\"count\",\"type\":\"integer\"}]"));
+
+        // What an older build reads is the older key, and it must find the old format there: it
+        // splits that value on commas, so JSON would come back as options named `[{"name"`.
+        String legacy = saved.saveState().get("options");
+        DiscordSlashCommandNode older = new DiscordSlashCommandNode();
+        older.loadState(Map.of("command", "deploy", "options", legacy));
+
+        assertEquals("env:text, count:integer", legacy);
+        assertEquals(List.of(new CommandOption("env", DiscordOptionType.TEXT),
+                        new CommandOption("count", DiscordOptionType.INTEGER)),
+                declaredOptions(older),
+                "an older build loses an option's values, which are newer than the format it "
+                        + "reads - but it must still get the options themselves");
+    }
+
+    @Test
+    void optionsAnOlderBuildMangledLoadAsNoneRatherThanAsNamesDiscordRefuses() {
+        DiscordSlashCommandNode node = new DiscordSlashCommandNode();
+
+        // What a build predating the JSON format wrote back after splitting it on commas: names
+        // Discord refuses, which used to cost the node every one of its commands.
+        node.loadState(Map.of("command", "ask", "optionsJson",
+                "[{\"name\":\"[{\\\"name\\\"\",\"type\":\"text\"},{\"name\":\"prompt\",\"type\":\"text\"}]"));
+
+        assertEquals(List.of(new CommandOption("prompt", DiscordOptionType.TEXT)), declaredOptions(node),
+                "an unusable name is dropped on its own; the options around it still load");
+    }
+
+    @Test
     void unreadableSavedOptionsCostTheirNodeRatherThanTheGraph() {
         DiscordSlashCommandNode node = new DiscordSlashCommandNode();
 
-        node.loadState(Map.of("command", "deploy", "options", "[{\"name\": truncated"));
+        node.loadState(Map.of("command", "deploy", "optionsJson", "[{\"name\": truncated"));
 
         assertEquals(List.of(), declaredOptions(node));
     }

@@ -79,6 +79,25 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
 
     private static final String DESCRIPTION = "HouseGraph command";
 
+    /**
+     * Where the full option list is saved, and where the one a build too old to know about it
+     * reads from.
+     * <p>
+     * Both are written on every save, because they are read by different versions of this
+     * library and a graph moves between them. {@code options} is the older key and holds the
+     * older, comma-separated {@code name:type} text; {@code optionsJson} holds everything an
+     * option can carry today. Writing only the JSON — which is what this node did when the JSON
+     * format arrived — put a value into {@code options} that an older build split on commas,
+     * turning <code>[{"name":"prompt",…}]</code> into an option literally named
+     * <code>[{"name"</code>. Discord rejects that name, and rejecting it cost the whole command:
+     * every slash command in such a graph vanished from Discord until the library was updated.
+     * So the old key keeps holding something an old build reads correctly — names and types;
+     * values and their mode are newer than that format and simply don't appear there.
+     */
+    private static final String OPTIONS_KEY = "optionsJson";
+
+    private static final String LEGACY_OPTIONS_KEY = "options";
+
     private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
     private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class);
     private final NodeVariable<String> senderId = new NodeVariable<>("Sender ID", String.class);
@@ -133,7 +152,8 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         state.put("command", command);
         state.put("ephemeral", Boolean.toString(ephemeral));
         state.put("hiddenByDefault", Boolean.toString(hiddenByDefault));
-        state.put("options", formatOptions(options));
+        state.put(OPTIONS_KEY, formatOptions(options));
+        state.put(LEGACY_OPTIONS_KEY, formatLegacyOptions(options));
         return state;
     }
 
@@ -146,7 +166,12 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
         ephemeral = Boolean.parseBoolean(state.get("ephemeral"));
         hiddenByDefault = Boolean.parseBoolean(state.get("hiddenByDefault"));
         options.clear();
-        options.addAll(parseOptions(state.get("options")));
+        String json = state.get(OPTIONS_KEY);
+        // The JSON key is the authority; the legacy key is what a build older than it reads, and
+        // what a graph saved by one still carries here.
+        options.addAll(parseOptions(normalizedCommand(), json == null || json.isBlank()
+                ? state.get(LEGACY_OPTIONS_KEY)
+                : json));
     }
 
     @Override
@@ -333,6 +358,14 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             if (normalized.isEmpty()) {
                 return null;
             }
+            if (!CommandOption.isValidName(normalized)) {
+                // Dropped here rather than at registration: Discord refuses the name, and until
+                // the gateway stopped taking the command down with it that refusal cost every
+                // other option too.
+                log.warn("Ignoring slash command option \"{}\": Discord takes only letters, digits,"
+                        + " \"-\" and \"_\" in an option name", normalized);
+                return null;
+            }
             List<String> declared = splitValues(values.getText());
             // CommandOption normalizes the rest: an empty list pairs with FREE, and a type
             // Discord takes no list for drops one it was handed anyway.
@@ -383,11 +416,12 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
     // --- Option state -------------------------------------------------------------
 
     /**
-     * The options as saved: a JSON array of <code>{name, type, values, mode}</code> entries, the
-     * last two present only for an option that offers values. JSON rather than the
-     * {@code "env, count:integer"} text this used to save, because those values are arbitrary
-     * text a person typed and every delimiter that could separate them is one a value is allowed
-     * to contain. Graphs saved in the old format still load — see {@link #parseOptions}.
+     * The options as saved under {@link #OPTIONS_KEY}: a JSON array of
+     * <code>{name, type, values, mode}</code> entries, the last two present only for an option
+     * that offers values. JSON rather than the {@code "env, count:integer"} text this used to
+     * save, because those values are arbitrary text a person typed and every delimiter that could
+     * separate them is one a value is allowed to contain. Graphs saved in the old format still
+     * load — see {@link #parseOptions}.
      */
     private static String formatOptions(List<CommandOption> options) {
         JSONArray saved = new JSONArray();
@@ -405,16 +439,34 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
     }
 
     /**
+     * The same options in the pre-JSON {@code "env, count:integer"} text, saved alongside the
+     * JSON under {@link #LEGACY_OPTIONS_KEY} so a build older than the JSON format reads names
+     * and types rather than shredding the JSON on its commas (see {@link #OPTIONS_KEY}). The type
+     * is always written out: this text is only ever read by the parser below, which defaults an
+     * unrecognized one to text anyway, and being explicit costs nothing. Names are safe to join
+     * on a comma because {@link CommandOption#isValidName} is what let them in.
+     */
+    private static String formatLegacyOptions(List<CommandOption> options) {
+        List<String> entries = new ArrayList<>();
+        for (CommandOption option : options) {
+            entries.add(option.name() + ":" + option.type().name().toLowerCase(Locale.ROOT));
+        }
+        return String.join(", ", entries);
+    }
+
+    /**
      * Reads back what {@link #formatOptions} wrote — or, for a graph saved before options could
      * offer values, the {@code "env, count:integer"} text that came before it. Unreadable state
-     * loads as no options rather than throwing, which would take the whole graph down with it.
+     * loads as no options rather than throwing, which would take the whole graph down with it,
+     * and so does a name Discord would refuse: {@code command} is named in the warning so the
+     * node it came from can be found on the graph.
      */
-    private static List<CommandOption> parseOptions(String text) {
+    private static List<CommandOption> parseOptions(String command, String text) {
         if (text == null || text.isBlank()) {
             return List.of();
         }
         if (!text.trim().startsWith("[")) {
-            return parseLegacyOptions(text);
+            return parseLegacyOptions(command, text);
         }
         List<CommandOption> parsed = new ArrayList<>();
         try {
@@ -422,7 +474,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             for (int i = 0; i < saved.length(); i++) {
                 JSONObject entry = saved.getJSONObject(i);
                 String name = entry.optString("name").trim().toLowerCase(Locale.ROOT);
-                if (name.isEmpty()) {
+                if (name.isEmpty() || !usableName(command, name)) {
                     continue;
                 }
                 List<String> values = new ArrayList<>();
@@ -441,7 +493,7 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
     }
 
     /** The pre-values format: a comma-separated {@code name[:type]} list, all of it free input. */
-    private static List<CommandOption> parseLegacyOptions(String text) {
+    private static List<CommandOption> parseLegacyOptions(String command, String text) {
         List<CommandOption> parsed = new ArrayList<>();
         for (String entry : text.split(",")) {
             String trimmed = entry.trim();
@@ -451,11 +503,27 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
             int colon = trimmed.indexOf(':');
             String name = (colon < 0 ? trimmed : trimmed.substring(0, colon)).trim().toLowerCase(Locale.ROOT);
             DiscordOptionType type = colon < 0 ? DiscordOptionType.TEXT : parseType(trimmed.substring(colon + 1).trim());
-            if (!name.isEmpty()) {
+            if (!name.isEmpty() && usableName(command, name)) {
                 parsed.add(new CommandOption(name, type));
             }
         }
         return parsed;
+    }
+
+    /**
+     * Whether {@code name} is one Discord would take, warning and answering false if not. Saved
+     * state is checked here rather than at registration because a name this far out of shape got
+     * there by a format being misread — an older build splitting today's JSON on its commas is
+     * the case that has actually happened — and dropping it here leaves the rest of the command
+     * standing.
+     */
+    private static boolean usableName(String command, String name) {
+        if (CommandOption.isValidName(name)) {
+            return true;
+        }
+        log.warn("/{}: dropping saved option \"{}\" - Discord takes only letters, digits, \"-\" and"
+                + " \"_\" in an option name, so re-add this option on the node", command, name);
+        return false;
     }
 
     private static DiscordOptionType parseType(String text) {

@@ -285,6 +285,12 @@ final class DiscordGateway {
      * all-or-nothing default, so granting it back to specific roles is a manual step a server
      * admin does per-guild in Server Settings -&gt; Integrations.
      * <p>
+     * An option Discord won't take is dropped on its own rather than with the command around it.
+     * It used to cost the command: JDA throws on a name outside {@code [\w-]}, and one such
+     * option — a graph whose saved options an older build of this library had mangled, say — took
+     * {@code /command} off Discord entirely, every other option with it. Losing one argument is
+     * recoverable from inside Discord; losing the command is not.
+     * <p>
      * Package-private rather than private so a test can register a spec and read back what
      * Discord would be told, without a connection.
      */
@@ -295,7 +301,11 @@ final class DiscordGateway {
             try {
                 SlashCommandData command = Commands.slash(name, spec.description());
                 for (CommandOption option : spec.options()) {
-                    command.addOptions(toOptionData(name, option));
+                    try {
+                        command.addOptions(toOptionData(name, option));
+                    } catch (IllegalArgumentException e) {
+                        log.warn("/{}: dropping option \"{}\" - {}", name, option.name(), e.getMessage());
+                    }
                 }
                 if (spec.hiddenByDefault()) {
                     command.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
