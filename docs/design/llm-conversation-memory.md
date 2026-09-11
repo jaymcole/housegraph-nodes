@@ -1,9 +1,10 @@
 # Giving the Local LLM node a memory
 
 Four places a multi-turn conversation could live, why the identifier-named one wins, and what
-changes if it does.
+changed when it was built.
 
-Status: **proposal**. Nothing here is built yet.
+Status: **built**. The ports, names and semantics below are what the library does; section 8 records
+which of the open questions were decided and which are deliberately still open.
 
 ---
 
@@ -59,11 +60,18 @@ text it can also show, cut down, and hand to a different server.
 two are near-equivalent, but for a base or code-completion model they are genuinely different calls,
 and somebody prompting one through this node today gets their current answers from `/api/generate`.
 
-**Recommendation: keep `/api/generate` when no conversation is in play, and use `/api/chat` only
-once there is one.** A graph that does not opt into memory then behaves exactly as it does now,
-which is what keeps this whole change additive (section 7). The cost is that Ollama has two reply
-shapes to read; `LlmApi.replyFrom` should accept `response` *or* `message.content` and name both in
+**Recommendation: keep `/api/generate` for a prompt in no conversation, and use `/api/chat` for
+every turn of one that is.** A graph that does not opt into memory then behaves exactly as it does
+now, which is what keeps this whole change additive (section 7). The cost is that Ollama has two
+reply shapes to read; `LlmApi.replyFrom` accepts `response` *or* `message.content` and names both in
 its failure message, which is also more forgiving of a server that answers the other one.
+
+**Naming the conversation is what switches the endpoint, not having a history yet.** Deriving it
+from the history would send turn one of every conversation to `/api/generate` and turn two onward to
+`/api/chat`, so a conversation's first answer would be shaped by a different call than its
+successors — on a chat-tuned model barely visible, on a base model plainly wrong. `LlmRequest`
+therefore carries "this belongs to a conversation" alongside the history, and a non-empty history
+counts as one whatever it was told, so the two cannot disagree.
 
 Switching every Ollama prompt to `/api/chat` would be one code path instead of two, and is the
 version of this change that breaks existing graphs quietly. Not worth it.
@@ -127,10 +135,11 @@ hand-formatting role labels. It is the workaround, not the answer.
 | **Turns** | integer, out | | How many exchanges this conversation holds after this run — 0 when there is no conversation. |
 
 **Clear Conversation** (new, action, `llm.ClearConversationNode`) takes **Conversation**, publishes
-**Turns** and **Found**, and has a flow-in and a flow-out. It forgets that conversation when flow
-arrives; being pulled for data reports what is there and changes nothing — the rule
-`ClearStoredValueNode` and `ClearCollectionNode` both follow, because a value read must never be a
-side effect.
+**Forgotten** (how many exchanges went with it) and **Found**, and has a flow-in and a flow-out. It
+forgets that conversation when flow arrives; being pulled for data answers whether there is one and
+changes nothing — the rule `ClearStoredValueNode` and `ClearCollectionNode` both follow, because a
+value read must never be a side effect. On a pull **Forgotten** is 0, because nothing was: reporting
+the size of what is still there would be a lie told by that port's name.
 
 ### The semantics worth stating on the node
 
@@ -201,7 +210,7 @@ a local model's first slow load.
 | `LlmMessage` | new — one `(role, content)` turn |
 | `LlmConversation` | new — one conversation's turns, trimming, last-touched instant |
 | `LlmConversations` | new — the named map in `ResourceRegistry.shared()`, idle expiry and the LRU cap |
-| `LlmRequest` | takes the prior turns alongside the prompt |
+| `LlmRequest` | takes the prior turns, and whether this belongs to a conversation, alongside the prompt |
 | `LlmApi` | history in both request bodies; `/api/chat` when a conversation is in play; Ollama reply read from `response` *or* `message.content` |
 | `LocalLlmPromptNode` | three inputs, one output, and recording the exchange after a successful reply |
 | `ClearConversationNode` | new |
@@ -214,13 +223,25 @@ a local model's first slow load.
 does — provided 2a holds and the no-conversation path still posts to `/api/generate`. Moving every
 Ollama prompt to `/api/chat` would make the same feature `#major`.
 
-## 8. Open questions
+## 8. What was decided, and what is still open
 
-- **Defaults.** Is 8 exchanges and 60 minutes right, or should `Forget After` default to never and
-  leave forgetting to an explicit `/reset`?
-- **A `History` output?** Useful for debugging what the model was actually sent, and one more port on
-  an already wide node. Left out above.
-- **Persistence.** Conversations surviving a HouseGraph restart is section 4's deferred decision —
-  worth it for a bot people talk to daily, and it needs its own answer about where the text lands.
-- **Port naming.** **Conversation** reads well next to `Clear Conversation`; **Conversation ID** says
-  more plainly that it is a name rather than the text of one.
+Decided as built:
+
+- **Defaults** are 8 exchanges and 60 minutes. Both are ports, so a graph that wants yesterday's
+  conversation back sets **Forget After (min)** to 0 and resets deliberately instead.
+- **Port naming** is **Conversation**, which reads as the same thing on both nodes.
+- **0 History Turns** turns memory off for one node without unwiring the name it was given — useful
+  when two nodes share a conversation and only one of them should be writing to it.
+- **Ollama's endpoint** follows section 2a: `/api/generate` until there is a history, `/api/chat`
+  after. `replyFrom` reads either shape, so a server answering the other one is not a failure.
+
+Still open:
+
+- **A `History` output.** Useful for debugging what the model was actually sent, and one more port on
+  an already wide node. Left out; **Turns** covers "is it remembering anything".
+- **Persistence.** Conversations surviving a restart is section 4's deferred decision — worth it for
+  a bot people talk to daily, and it needs its own answer about where the text lands and who can
+  read it.
+- **Token-aware trimming.** **History Turns** is a proxy for the context window because nothing here
+  can count tokens. A model with a small window still fails at the server rather than being trimmed
+  to fit.
