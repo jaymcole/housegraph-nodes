@@ -12,8 +12,8 @@ import java.util.Locale;
 
 /**
  * The two shapes a locally running LLM answers to, and everything that differs between them: the
- * path to POST to, the request body, where in the reply the generated text is, and how to ask the
- * server which models it has.
+ * path to POST to, the request body, where in the reply the generated text is, how a streamed
+ * answer is framed, and how to ask the server which models it has.
  * <p>
  * <b>{@link #OLLAMA}</b> is Ollama's own {@code /api/generate}: model, prompt and an optional
  * system prompt as top-level fields, sampling settings under {@code options}, and the answer in
@@ -290,8 +290,21 @@ public enum LlmApi {
     /**
      * This API's request body for one prompt, with whatever was said before it.
      * <p>
-     * Both bodies say {@code "stream": false}: Ollama streams by default, and a streamed answer
-     * arrives as a run of newline-separated JSON objects that {@link #replyFrom} could not read.
+     * <b>{@code stream} is whatever the request asked for.</b> False is the one-reply call this
+     * library made before progress updates existed, read back by {@link #replyFrom}; true asks for
+     * the answer in pieces, read back a line at a time by {@link #chunkFrom}. The two are different
+     * enough on the wire that {@code replyFrom} cannot read a streamed body at all, which is why
+     * the flag travels on the request rather than being decided here.
+     * <p>
+     * <b>{@code think} is Ollama's alone, and is sent only when it was asked for.</b> A thinking
+     * model is told to reason with a top-level {@code think} - {@code true}, {@code false}, or a
+     * level such as {@code low} - and answers with its reasoning in a field of its own. Sending it
+     * to a model that cannot think is <em>not</em> harmless: Ollama answers HTTP 400
+     * {@code "<model>" does not support thinking}, so a blank setting sends no field at all rather
+     * than sending {@code false}, and every model that worked before still works. An
+     * OpenAI-compatible server has no agreed request field for it, so the setting is dropped there
+     * for {@code num_ctx}'s reason - see the Think input's documentation on the prompt node.
+     * <p>
      * A null or blank system prompt is left out entirely rather than sent as an empty string,
      * which some servers treat as "an empty system prompt" instead of "none", and a null
      * temperature or context window is left out so the server's own default stands.
@@ -312,7 +325,7 @@ public enum LlmApi {
     public String requestBody(LlmRequest request) {
         JSONObject body = new JSONObject()
                 .put("model", request.model())
-                .put("stream", false);
+                .put("stream", request.streaming());
         String system = request.system();
         Float temperature = request.temperature();
         switch (this) {
@@ -334,6 +347,9 @@ public enum LlmApi {
                 }
                 if (!options.isEmpty()) {
                     body.put("options", options);
+                }
+                if (!request.think().isEmpty()) {
+                    body.put("think", think(request.think()));
                 }
             }
             case OPENAI -> {
@@ -408,6 +424,139 @@ public enum LlmApi {
                 yield message.optString("content", "");
             }
         };
+    }
+
+    /**
+     * The reasoning out of a successful non-streamed reply, or {@code ""} when there is none.
+     * <p>
+     * <b>Absent is not an error here</b>, unlike {@link #replyFrom}'s missing content field: a
+     * model that was not asked to think, or cannot, answers without the field at all, and that is
+     * the ordinary case rather than a server speaking the wrong protocol. Ollama puts it beside the
+     * answer - {@code thinking} on {@code /api/generate}, {@code message.thinking} on
+     * {@code /api/chat}; an OpenAI-compatible server has no agreed field, so this is {@code ""}
+     * there whatever the model did.
+     *
+     * @param responseBody the server's response body
+     * @return the reasoning, never null
+     */
+    public String thinkingFrom(String responseBody) {
+        if (this != OLLAMA) {
+            return "";
+        }
+        JSONObject json = parseObject(responseBody);
+        if (json.has("thinking")) {
+            return json.optString("thinking", "");
+        }
+        JSONObject message = json.optJSONObject("message");
+        return message == null ? "" : message.optString("thinking", "");
+    }
+
+    /**
+     * One line of a streamed answer, or null if that line carries nothing to publish.
+     * <p>
+     * <b>The two protocols stream differently.</b> Ollama sends newline-separated JSON objects, one
+     * per line and nothing else; an OpenAI-compatible server sends server-sent events, where the
+     * payload lines begin {@code data:}, other lines are framing to ignore, and the stream is
+     * closed by the literal {@code data: [DONE]}. Both are read a line at a time, which is why this
+     * takes a line rather than a body.
+     * <p>
+     * <b>A null answer means "nothing here", not "end of stream".</b> Blank lines between SSE
+     * events, and any field other than {@code data}, are framing; a caller keeps reading. Only a
+     * chunk whose {@link LlmStreamChunk#done()} is set ends the answer.
+     * <p>
+     * <b>An error arriving mid-stream throws.</b> Both servers can start answering and then fail -
+     * a model unloaded under memory pressure, a context overflow - and they say so with an
+     * {@code error} field in the middle of the stream, after HTTP 200 has already gone out. Read as
+     * an ordinary chunk it would look like a model that simply stopped, handing a graph half an
+     * answer as though it were the whole one.
+     *
+     * @param line one line of the response body
+     * @return what that line carries, or null if it carries nothing
+     * @throws LlmException if the line is this API's shape but reports an error, or is not JSON at all
+     */
+    public LlmStreamChunk chunkFrom(String line) {
+        String text = line == null ? "" : line.strip();
+        if (text.isEmpty()) {
+            return null;
+        }
+        if (this == OPENAI) {
+            if (!text.startsWith("data:")) {
+                // An SSE comment (": keep-alive") or another field (event:, id:, retry:).
+                return null;
+            }
+            String payload = text.substring("data:".length()).strip();
+            if (payload.isEmpty()) {
+                return null;
+            }
+            if (payload.equals("[DONE]")) {
+                return LlmStreamChunk.end();
+            }
+            return openAiChunk(payload);
+        }
+        return ollamaChunk(text);
+    }
+
+    /** One {@code /api/generate} or {@code /api/chat} line: both shapes, since only the caller knows which it asked for. */
+    private static LlmStreamChunk ollamaChunk(String text) {
+        JSONObject json = parseObject(text);
+        requireNoError(text, json);
+        JSONObject message = json.optJSONObject("message");
+        String content = json.has("response")
+                ? json.optString("response", "")
+                : (message == null ? "" : message.optString("content", ""));
+        String thinking = json.has("thinking")
+                ? json.optString("thinking", "")
+                : (message == null ? "" : message.optString("thinking", ""));
+        return new LlmStreamChunk(content, thinking, json.optBoolean("done", false));
+    }
+
+    /**
+     * One SSE payload. The delta is at {@code choices[0].delta.content}; reasoning, where a server
+     * exposes it at all, is at {@code reasoning_content} beside it - llama.cpp and vLLM both use
+     * that name, and a server that uses neither simply streams no reasoning.
+     * <p>
+     * A payload with no {@code choices} at all is a keep-alive or a usage-only frame, not a
+     * protocol mismatch: a stream that was not this shape would have failed at the first line, so
+     * skipping it is safer than failing an answer that is already half delivered.
+     */
+    private static LlmStreamChunk openAiChunk(String payload) {
+        JSONObject json = parseObject(payload);
+        requireNoError(payload, json);
+        JSONArray choices = json.optJSONArray("choices");
+        JSONObject first = choices == null || choices.isEmpty() ? null : choices.optJSONObject(0);
+        if (first == null) {
+            return null;
+        }
+        JSONObject delta = first.optJSONObject("delta");
+        String content = delta == null ? "" : delta.optString("content", "");
+        String thinking = delta == null ? "" : delta.optString("reasoning_content", "");
+        return new LlmStreamChunk(content, thinking, !first.isNull("finish_reason"));
+    }
+
+    /** Fails a stream that reported an error part-way through - see {@link #chunkFrom}. */
+    private static void requireNoError(String line, JSONObject json) {
+        if (json.isNull("error")) {
+            return;
+        }
+        throw new LlmException("The LLM server failed part-way through the answer: "
+                + LocalLlmClient.errorFrom(line));
+    }
+
+    /**
+     * An authored thinking setting as Ollama wants it: {@code true} and {@code false} as JSON
+     * booleans, anything else as the string it is, which is how a level ({@code low},
+     * {@code medium}, {@code high}) is sent. An unrecognised level is left for the server to reject
+     * and name, rather than being guessed at here - Ollama has added levels over time and a list
+     * kept in this file would be the thing that goes stale.
+     */
+    private static Object think(String authored) {
+        if (authored.equalsIgnoreCase("true")) {
+            return Boolean.TRUE;
+        }
+        if (authored.equalsIgnoreCase("false")) {
+            return Boolean.FALSE;
+        }
+        return authored;
     }
 
     private String missingField(String field, String responseBody) {
