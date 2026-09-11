@@ -43,12 +43,14 @@ class LocalLlmPromptNodeTest {
         LocalLlmPromptNode node = new LocalLlmPromptNode();
 
         assertEquals(List.of("Prompt", "System Prompt", "Conversation ID", "History Turns",
-                        "Forget After (min)", "Model", "Server", "API", "Temperature", "API Key", "Timeout (s)"),
+                        "Forget After (min)", "Model", "Server", "API", "Temperature",
+                        "Context (tokens)", "API Key", "Timeout (s)"),
                 Nodes.inputNames(node));
         assertEquals(List.of("Response", "Turns"), Nodes.outputNames(node));
-        // Ask first: a saved edge into the single unnamed flow-in this node used to have was
-        // recorded by position, so index 0 has to still be the port that prompts.
-        assertEquals(List.of("Ask", "Clear"), Nodes.flowInputNames(node));
+        // One flow-in, still called Ask: a graph saved against v3.0.0 recorded its edge by that
+        // name, and a blank-named port is referenced by position instead, so going back to a bare
+        // anchor would drop that edge on load.
+        assertEquals(List.of("Ask"), Nodes.flowInputNames(node));
         assertEquals(1, node.getFlowOutputs().size());
         assertEquals(FlowPort.Direction.IN, node.getFlowInputs().get(0).direction);
     }
@@ -206,6 +208,29 @@ class LocalLlmPromptNodeTest {
     }
 
     @Test
+    void aContextWindowReachesOllamaWhereItExpectsIt() throws IOException {
+        // The fix for a conversation that answers worse the longer it gets: Ollama drops the oldest
+        // tokens past its own default window silently, so the window has to be sayable.
+        String address = serve("{\"response\":\"ok\",\"done\":true}");
+        LocalLlmPromptNode node = prompting(address, "hello");
+        Nodes.set(node, "Context (tokens)", 8192);
+
+        Nodes.run(node);
+
+        assertEquals(8192, new JSONObject(lastBody).getJSONObject("options").getInt("num_ctx"));
+    }
+
+    @Test
+    void noContextWindowLeavesTheServersOwnDefaultAlone() throws IOException {
+        String address = serve("{\"response\":\"ok\",\"done\":true}");
+        LocalLlmPromptNode node = prompting(address, "hello");
+
+        Nodes.run(node);
+
+        assertFalse(new JSONObject(lastBody).has("options"), lastBody);
+    }
+
+    @Test
     void aFailedRunRecordsNothing() throws IOException {
         String address = serve("{\"response\":\"first answer\",\"done\":true}");
         String name = aConversation();
@@ -220,53 +245,12 @@ class LocalLlmPromptNodeTest {
         Nodes.set(node, "Prompt", "What else did he write?");
         assertThrows(LlmException.class, () -> Nodes.run(node));
 
-        ClearConversationNode clear = new ClearConversationNode();
-        Nodes.set(clear, "Conversation ID", name);
-        assertEquals(1, clear.forget(name), "only the exchange that succeeded is remembered");
+        assertEquals(1, LlmConversations.shared().peek(name).orElseThrow().exchanges(),
+                "only the exchange that succeeded is remembered");
     }
 
-    @Test
-    void clearingForgetsThisNodesConversationAndEmptiesWhatItPublished() throws IOException {
-        String address = serve("{\"message\":{\"content\":\"Frank Herbert.\"},\"done\":true}");
-        String name = aConversation();
-        LocalLlmPromptNode node = prompting(address, "Who wrote Dune?");
-        Nodes.set(node, "Conversation ID", name);
-        Nodes.run(node);
-        assertEquals(1, (Integer) Nodes.get(node, "Turns"));
 
-        assertTrue(node.forget());
 
-        assertEquals(0, (Integer) Nodes.get(node, "Turns"));
-        // Not the answer left over from the last prompt: a Reply pulled after a reset would
-        // otherwise repeat it as though it had just been said.
-        assertEquals("", Nodes.get(node, "Response"));
-        assertTrue(LlmConversations.shared().peek(name).isEmpty());
-    }
-
-    @Test
-    void clearingSomethingNobodyStartedIsNotAFailure() {
-        // /reset from someone who has not said anything yet, and a node with no id at all.
-        LocalLlmPromptNode named = new LocalLlmPromptNode();
-        Nodes.set(named, "Conversation ID", aConversation());
-        assertFalse(named.forget());
-        assertFalse(new LocalLlmPromptNode().forget());
-    }
-
-    @Test
-    void clearingReachesTheSameConversationTheClearNodeDoes() {
-        // The id is the whole connection: no edge, and it does not matter which node does the
-        // forgetting.
-        String name = aConversation();
-        LocalLlmPromptNode node = new LocalLlmPromptNode();
-        Nodes.set(node, "Conversation ID", name);
-        LlmConversations.shared().get(name, 60).record("Who wrote Dune?", "Frank Herbert.", 8);
-
-        ClearConversationNode clear = new ClearConversationNode();
-        Nodes.set(clear, "Conversation ID", name);
-        assertEquals(1, clear.forget(name));
-
-        assertFalse(node.forget(), "the Clear node already took it");
-    }
 
     /** A node pointed at {@code address} with {@code question} on its Prompt input. */
     private LocalLlmPromptNode prompting(String address, String question) {

@@ -18,15 +18,22 @@ import java.util.Optional;
  * that id, since the history has always lived under it rather than in either node's fields (see
  * {@link LlmConversations}).
  * <p>
- * <b>Local LLM has its own Clear port, and this node is still the one you want for sequencing.</b>
- * Clearing from a trigger of its own — a {@code /reset} command — is what that port is for, and it
- * saves a node. But "clear, then ask, from one trigger" cannot be done on one node: sibling flow
- * edges run concurrently and the node fires once, so the clear can be silently dropped. That is
- * what split Collect Items into Add/Clear Collection and took the Clear port off Stored Value.
- * Putting the clear <em>upstream</em> makes the order a fact rather than a hope:
+ * <b>This is the only place clearing belongs, and the reason is the id rather than the race.</b>
+ * Local LLM carried a Clear flow-in in v3.0.0 and it could not work: a data input takes at most one
+ * edge, so that node's <b>Conversation ID</b> has exactly one source, and a {@code /reset} arriving
+ * at a second port still resolved the id through that one edge — naming whoever last ran
+ * {@code /ask}. One person's reset wiped another person's conversation. A clear has to read the id
+ * belonging to the run that triggered it, so it needs an input of its own, which is this node.
+ * <p>
+ * <b>It also fixes the ordering that a second port could not.</b> "Clear, then ask, from one
+ * trigger" on one node races — sibling flow edges run concurrently and a node fires once, so the
+ * clear can be silently dropped, which is what split Collect Items into Add/Clear Collection and
+ * took the Clear port off Stored Value. Upstream makes the order a fact rather than a hope:
  * <pre>trigger &rarr; Clear Conversation &rarr; Local LLM</pre>
- * It is also the way to reset a conversation from a graph with no prompt node in it, and the only
- * way to see <b>Forgotten</b> — how much was actually thrown away.
+ * <p>
+ * <b>The Discord shape:</b> wire each command's own Sender ID into the node it triggers —
+ * {@code /ask} &rarr; Local LLM, {@code /reset} &rarr; this node — and each person resets their own
+ * conversation and nobody else's.
  * <p>
  * <b>Being pulled for data does nothing.</b> A downstream node resolving Forgotten or Found without
  * any flow arriving here answers whether there is a conversation and leaves it alone — the same
