@@ -20,6 +20,11 @@ import java.util.List;
  * "thinking…" response). This is the slash counterpart to Send Message — the reply goes
  * to the specific invocation, so no channel is needed. Control flows through.
  * <p>
+ * A {@code Message} longer than Discord accepts (2000 characters) is answered as several messages
+ * rather than failing the node — see
+ * {@link io.github.jaymcole.housegraph.plugins.discord.DiscordMessages}. Nothing an LLM node
+ * produced is lost or cut short because of how long it happened to run.
+ * <p>
  * <b>Attachments</b> takes an image, a file path, or a list of either — it is typed to accept
  * anything because a port typed for images could not take the list Graph Images emits, and one
  * typed for lists could not take the single image a Camera Snapshot emits. A JavaFX image is

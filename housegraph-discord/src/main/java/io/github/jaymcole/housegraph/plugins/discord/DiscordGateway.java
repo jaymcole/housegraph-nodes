@@ -450,6 +450,50 @@ final class DiscordGateway {
     }
 
     /**
+     * The {@link DiscordReply} handed to the graph for an already-deferred interaction: it answers
+     * by editing the "thinking…" response Discord is showing, and, when the text is longer than
+     * one Discord message may be, follows the rest up behind it.
+     * <p>
+     * <b>Why a reply can be several messages.</b> What a graph replies with is usually something
+     * another node produced — an LLM answer above all — and its length is neither chosen nor
+     * visible to whoever wired the graph. Sent whole, anything over
+     * {@value DiscordMessages#MAX_LENGTH} characters failed the node and reached Discord as
+     * nothing at all, leaving the command stuck on "thinking…"; see {@link DiscordMessages} for
+     * where the text is cut.
+     * <p>
+     * <b>The follow-ups are queued one from the last one's completion</b>, not all at once: JDA
+     * promises nothing about the order two independent requests finish in, and an answer whose
+     * second half arrives first is worse than one that takes a moment longer. Each carries the
+     * interaction's own ephemeral flag explicitly, because a message sent through the hook is
+     * public by default — an invoker-only answer must not have its overflow land in the channel
+     * for everyone.
+     * <p>
+     * <b>Attachments ride the first message</b>, the one that is actually this interaction's
+     * reply. That also keeps {@code DiscordUploads.open} where it has always been, before
+     * anything has been sent, so a path with no file at it fails the reply rather than posting
+     * one that claims a picture it never had.
+     */
+    private static DiscordReply replyThrough(InteractionHook hook, boolean ephemeral) {
+        return (text, attachments) -> {
+            List<String> messages = DiscordMessages.split(text);
+            var answer = attachments.isEmpty()
+                    ? hook.editOriginal(messages.get(0))
+                    : hook.editOriginal(messages.get(0)).setFiles(DiscordUploads.open(attachments));
+            answer.queue(sent -> followUp(hook, messages, 1, ephemeral));
+        };
+    }
+
+    /** Sends {@code messages} from {@code index} on, each queued once the one before it landed. */
+    private static void followUp(InteractionHook hook, List<String> messages, int index, boolean ephemeral) {
+        if (index >= messages.size()) {
+            return;
+        }
+        hook.sendMessage(messages.get(index))
+                .setEphemeral(ephemeral)
+                .queue(sent -> followUp(hook, messages, index + 1, ephemeral));
+    }
+
+    /**
      * The session's single JDA listener: adapts each gateway event once and hands the result to
      * every joined bot. One listener per session rather than one per bot is the point — an
      * interaction may only be acknowledged once, so deferring has to happen here, before the fan
@@ -477,10 +521,7 @@ final class DiscordGateway {
             // Ephemeral (invoker-only) is decided here, at defer time.
             boolean ephemeral = ephemeralByCommand.getOrDefault(event.getName(), false);
             event.deferReply(ephemeral).queue();
-            InteractionHook hook = event.getHook();
-            DiscordReply reply = (text, attachments) -> (attachments.isEmpty()
-                    ? hook.editOriginal(text)
-                    : hook.editOriginal(text).setFiles(DiscordUploads.open(attachments))).queue();
+            DiscordReply reply = replyThrough(event.getHook(), ephemeral);
 
             Map<String, String> options = new HashMap<>();
             for (OptionMapping option : event.getOptions()) {
@@ -524,11 +565,9 @@ final class DiscordGateway {
             // DiscordBot#setButtonEphemeral) — normally a Discord Send Buttons node, deciding based
             // on whether anything is actually wired to its Reply output. An undeclared id (e.g. a
             // button this session didn't send) defaults to ephemeral, the safer choice.
-            event.deferReply(isButtonEphemeral(event.getComponentId())).queue();
-            InteractionHook hook = event.getHook();
-            DiscordReply reply = (text, attachments) -> (attachments.isEmpty()
-                    ? hook.editOriginal(text)
-                    : hook.editOriginal(text).setFiles(DiscordUploads.open(attachments))).queue();
+            boolean ephemeral = isButtonEphemeral(event.getComponentId());
+            event.deferReply(ephemeral).queue();
+            DiscordReply reply = replyThrough(event.getHook(), ephemeral);
 
             // Disable the clicked message's buttons so it can't be pressed again — unless whichever
             // joined bot declared this button id opted out (see DiscordBot#setButtonDisableOnClick),
