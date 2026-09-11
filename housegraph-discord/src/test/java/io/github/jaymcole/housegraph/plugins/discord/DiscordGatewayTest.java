@@ -338,6 +338,25 @@ class DiscordGatewayTest {
         session.leave(bot);
     }
 
+    @Test
+    void anOptionDiscordWouldRefuseIsDroppedWithoutTakingItsCommandDown() throws Exception {
+        CountingLogin login = new CountingLogin();
+        DiscordBot bot = new DiscordBot();
+        DiscordGateway session = DiscordGateway.join("token-bad-option", bot, login);
+
+        // A name out of Discord's [\w-] - what an older build of this library left in a graph
+        // after splitting today's JSON option list on its commas.
+        List<SlashCommandData> data = session.toCommandData(List.of(spec("ask",
+                new CommandOption("[{\"name\"", DiscordOptionType.TEXT),
+                new CommandOption("prompt", DiscordOptionType.TEXT))));
+
+        assertEquals(List.of("ask"), data.stream().map(SlashCommandData::getName).toList(),
+                "one unusable option must not cost the command - it used to take /ask off Discord");
+        assertEquals(List.of("prompt"), data.get(0).getOptions().stream().map(OptionData::getName).toList());
+
+        session.leave(bot);
+    }
+
     /** Registers {@code spec} the way a sync would and hands back the one option it declares. */
     private static OptionData onlyOption(DiscordGateway session, SlashCommandSpec spec) {
         List<SlashCommandData> data = session.toCommandData(List.of(spec));
