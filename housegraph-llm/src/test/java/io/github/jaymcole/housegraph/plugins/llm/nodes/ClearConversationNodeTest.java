@@ -17,7 +17,7 @@ class ClearConversationNodeTest {
     void itHasThePortsItsDocumentationDescribes() {
         ClearConversationNode node = new ClearConversationNode();
 
-        assertEquals(List.of("Conversation"), Nodes.inputNames(node));
+        assertEquals(List.of("Conversation ID"), Nodes.inputNames(node));
         assertEquals(List.of("Forgotten", "Found"), Nodes.outputNames(node));
         assertEquals(1, node.getFlowInputs().size());
         assertEquals(1, node.getFlowOutputs().size());
@@ -50,7 +50,7 @@ class ClearConversationNodeTest {
         LlmConversation conversation = LlmConversations.shared().get(name, 60);
         conversation.record("Who wrote Dune?", "Frank Herbert.", 8);
         ClearConversationNode node = new ClearConversationNode();
-        Nodes.set(node, "Conversation", name);
+        Nodes.set(node, "Conversation ID", name);
 
         // Nodes.run() builds a context with no flow arrival, which is exactly a pull.
         Nodes.run(node);
@@ -65,7 +65,7 @@ class ClearConversationNodeTest {
     void beingPulledForAConversationThatDoesNotExistDoesNotStartOne() {
         String name = aConversation();
         ClearConversationNode node = new ClearConversationNode();
-        Nodes.set(node, "Conversation", name);
+        Nodes.set(node, "Conversation ID", name);
 
         Nodes.run(node);
 

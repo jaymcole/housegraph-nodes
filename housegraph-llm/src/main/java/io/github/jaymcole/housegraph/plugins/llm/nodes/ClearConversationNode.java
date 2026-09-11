@@ -13,17 +13,20 @@ import io.github.jaymcole.housegraph.plugins.llm.LlmConversations;
 import java.util.Optional;
 
 /**
- * Forgets one conversation — the resetting half of the pair with {@link LocalLlmPromptNode}. Give
- * this node the same <b>Conversation</b> name a Local LLM node is using and flow into it; nothing
- * connects the two but the name, since the history has always lived under that name rather than in
- * either node's fields (see {@link LlmConversations}).
+ * Forgets one conversation, from anywhere on the canvas. Give this node the same
+ * <b>Conversation ID</b> a Local LLM node is using and flow into it; nothing connects the two but
+ * that id, since the history has always lived under it rather than in either node's fields (see
+ * {@link LlmConversations}).
  * <p>
- * <b>Why this is a separate node rather than a second port on Local LLM.</b> A Clear flow-in
- * alongside the prompt's would be the shape this repository has now split out twice — Collect Items
- * into Add/Clear Collection, and Stored Value's Clear port into Clear Stored Value — because
- * sibling flow edges from one trigger run concurrently and race on the node's re-entry gate, so the
- * clear can be silently abandoned. A name does the joining instead, and {@code /reset} is then a
- * straight line of its own.
+ * <b>Local LLM has its own Clear port, and this node is still the one you want for sequencing.</b>
+ * Clearing from a trigger of its own — a {@code /reset} command — is what that port is for, and it
+ * saves a node. But "clear, then ask, from one trigger" cannot be done on one node: sibling flow
+ * edges run concurrently and the node fires once, so the clear can be silently dropped. That is
+ * what split Collect Items into Add/Clear Collection and took the Clear port off Stored Value.
+ * Putting the clear <em>upstream</em> makes the order a fact rather than a hope:
+ * <pre>trigger &rarr; Clear Conversation &rarr; Local LLM</pre>
+ * It is also the way to reset a conversation from a graph with no prompt node in it, and the only
+ * way to see <b>Forgotten</b> — how much was actually thrown away.
  * <p>
  * <b>Being pulled for data does nothing.</b> A downstream node resolving Forgotten or Found without
  * any flow arriving here answers whether there is a conversation and leaves it alone — the same
@@ -45,7 +48,7 @@ import java.util.Optional;
 public class ClearConversationNode extends BaseNode {
 
     private final NodeVariable<String> conversation =
-            new NodeVariable<>("Conversation", String.class, true).required();
+            new NodeVariable<>("Conversation ID", String.class, true).required();
 
     private final NodeVariable<Integer> forgotten = new NodeVariable<>("Forgotten", Integer.class);
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
