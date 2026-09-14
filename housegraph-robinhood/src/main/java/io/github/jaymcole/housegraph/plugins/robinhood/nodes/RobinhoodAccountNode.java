@@ -55,16 +55,23 @@ import javafx.scene.layout.VBox;
  * does not pretend otherwise. It is worth it for a machine that trades on its own; it is not worth
  * it for one a person drives by hand, and MFA Secret is optional for exactly that reason.
  *
- * <h2>Why the credentials have to be typed in again after a reload</h2>
- * <b>Password and MFA Secret are secret inputs, and HouseGraph never writes a secret input's value
- * to a save file.</b> That is the host's rule and this library keeps to it: nothing here writes a
- * credential or a token to disk. So a reloaded graph has the fields empty and cannot connect until
- * they are filled in — by hand, or from something wired into those inputs.
+ * <h2>Wire the credentials from Secret Loader nodes</h2>
+ * <b>Username, Password and MFA Secret are meant to come from HouseGraph's built-in Secret Loader
+ * node</b> — one per field, each pointing at a key in the encrypted secret store. The Secret Loader
+ * saves the <em>key</em> and resolves the value fresh on every run, so a reloaded graph connects
+ * with nothing typed in and nothing sensitive in the file.
  * <p>
- * That is also why this node does <b>not</b> reconnect by itself on load, unlike the Discord Bot
- * and Local LLM Server nodes it otherwise resembles. There would be nothing to reconnect with, and
- * a brokerage session silently re-establishing itself the moment a file is opened is not a thing to
- * do quietly even when it is possible.
+ * Typing straight into the fields works too, and is the quicker way to try something out. The
+ * difference is what survives: <b>all three are secret inputs, so HouseGraph never writes their
+ * values to a save file</b> — a typed password is gone when the graph is reloaded, where a wired
+ * one comes back. Nothing in this library writes a credential or a token to disk either. The only
+ * thing that persists a credential anywhere is the host's secret store, which is encrypted at rest.
+ * <p>
+ * This node does <b>not</b> reconnect by itself on load, unlike the Discord Bot and Local LLM
+ * Server nodes it otherwise resembles. With Secret Loaders wired it could — the credentials would
+ * be there — which makes this a choice rather than a limitation: a brokerage session
+ * re-establishing itself the moment a file is opened is not a thing to do quietly. Wire a startup
+ * trigger into <b>Connect</b> for a graph that should log itself in.
  *
  * <h2>The ports</h2>
  * <b>Connect</b> logs in; connecting an already-connected account logs in again, which is what a
@@ -106,8 +113,16 @@ public class RobinhoodAccountNode extends BaseNode implements NodeContentProvide
 
     private final NodeVariable<String> nameInput =
             withDefault(new NodeVariable<>("Account Name", String.class, true), DEFAULT_NAME);
+    /**
+     * Secret, although a username is not much of one, because of where the value would otherwise
+     * end up. A save file records a manually-editable input's <em>current</em> value, and it cannot
+     * tell one somebody typed from one an edge resolved a moment ago — {@code isPersistentValue} is
+     * a flag set at construction, not a fact about where the value came from. So leaving this port
+     * unmarked would write the username a Secret Loader had just fetched straight into the graph
+     * file, which is the one thing fetching it from the store was meant to avoid.
+     */
     private final NodeVariable<String> usernameInput =
-            new NodeVariable<>("Username", String.class, true).required();
+            new NodeVariable<>("Username", String.class, true).required().markSecret();
     private final NodeVariable<String> passwordInput =
             new NodeVariable<>("Password", String.class, true).required().markSecret();
     private final NodeVariable<String> mfaSecretInput =

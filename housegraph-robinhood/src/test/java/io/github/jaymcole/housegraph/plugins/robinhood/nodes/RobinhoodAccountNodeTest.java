@@ -1,5 +1,6 @@
 package io.github.jaymcole.housegraph.plugins.robinhood.nodes;
 
+import io.github.jaymcole.housegraph.graph.NodeVariable;
 import io.github.jaymcole.housegraph.plugins.robinhood.RobinhoodException;
 import io.github.jaymcole.housegraph.plugins.robinhood.RobinhoodSession;
 import io.github.jaymcole.housegraph.plugins.robinhood.StubRobinhood;
@@ -14,7 +15,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -138,20 +138,35 @@ class RobinhoodAccountNodeTest {
     }
 
     @Test
-    void marksThePasswordAndSeedSecretAndTheUsernameRequired() {
-        assertTrue(secret("Password"));
-        assertTrue(secret("MFA Secret"));
-        assertFalse(secret("Username"));
-        assertNotNull(node.getInputs());
-        assertTrue(node.getInputs().stream()
-                .filter(input -> input.name.equals("Username")).allMatch(input -> input.isRequired()));
+    void noCredentialPortIsEverWrittenToASaveFile() {
+        // Including Username, which is not much of a secret but is still a credential. A save file
+        // records a manually-editable input's current value and cannot tell a typed one from one an
+        // edge resolved a moment ago, so an unmarked port here would write whatever a Secret Loader
+        // had just fetched straight into the graph file.
+        for (String credential : List.of("Username", "Password", "MFA Secret")) {
+            assertTrue(input(credential).isSecret(), credential + " is not marked secret");
+            assertFalse(input(credential).isPersistentValue(),
+                    credential + " would be written to the save file");
+        }
+        // And the settings that are not credentials still persist, or the node would forget its own
+        // name every time the graph was reopened.
+        assertTrue(input("Account Name").isPersistentValue());
+        assertTrue(input("Approval Timeout (s)").isPersistentValue());
     }
 
-    private boolean secret(String inputName) {
-        return node.getInputs().stream()
-                .filter(input -> input.name.equals(inputName))
-                .findFirst()
-                .orElseThrow()
-                .isSecret();
+    @Test
+    void requiresAUsernameAndPasswordFromSomewhere() {
+        assertTrue(input("Username").isRequired());
+        assertTrue(input("Password").isRequired());
+        // Optional: an account with app approval rather than an authenticator has no seed to give.
+        assertFalse(input("MFA Secret").isRequired());
     }
+
+    private NodeVariable<?> input(String name) {
+        return node.getInputs().stream()
+                .filter(variable -> variable.name.equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no input named " + name));
+    }
+
 }

@@ -79,30 +79,42 @@ connection look like a new phone, which asks for device approval *every single t
 one thing a person has to do once into a thing they have to do hourly. Deriving it keeps it stable
 across restarts without this library writing anything to disk.
 
-## 4. Secrets: what is held, and what is never written
+## 4. Secrets: the store holds them, the graph file never does
 
 **Nothing in this library writes a credential or a token to disk.**
 
-`Password` and `MFA Secret` are `markSecret()` inputs, and HouseGraph does not write a secret
-input's value to a save file (see `NodeVariable.isPersistentValue`). Tokens live in the session
-object, in memory, for the life of the process. There is no cache file, no keyring entry, nothing
-under `AppDirectories`.
+Credentials come from HouseGraph's built-in **Secret Loader** node — one wired into each of
+**Username**, **Password** and **MFA Secret**, each pointing at a key in the host's encrypted secret
+store. The Secret Loader saves the *key* and resolves the *value* fresh on every run, so a reloaded
+graph connects with nothing typed in and nothing sensitive in the file. Tokens live in the session
+object, in memory, for the life of the process: no cache file, no keyring entry, nothing under
+`AppDirectories`.
 
-The cost is visible and was accepted: **a reloaded graph has empty credential fields and cannot
-connect until they are filled in again.** Which is also why the account node is not `AutoStartable`,
-unlike the Discord Bot and Local LLM Server nodes it otherwise resembles — there would be nothing to
-reconnect with, and a brokerage session silently re-establishing itself the moment a file is opened
-is not a thing to do quietly even when it is possible.
+Typing straight into the fields works too, and is quicker for trying something out. All three ports
+are `markSecret()`, so a typed value is gone on reload where a wired one comes back.
 
-The one place this pinches is a genuinely unattended machine, which has to be given its credentials
-once per restart. The alternative — writing the refresh token into the host's `SecretsStore` —
-was rejected for now: `sdk.Secrets` is deliberately read-only, it is the seam a future per-library
-permission check would sit behind, and a node library that writes to the credential store is exactly
-what that seam exists to be able to say no to later.
+**Username is marked secret even though a username is not much of a secret**, and the reason is
+worth writing down because it is not obvious. A save file records a manually-editable input's
+*current* value, and `NodeVariable.isPersistentValue()` is a flag set at construction — it cannot
+tell a value somebody typed from one an edge resolved a moment ago. So an unmarked Username port
+would take whatever the Secret Loader had just fetched and write it into the graph file, which is
+precisely what fetching it from the store was meant to avoid. The same trap is waiting for any node
+that accepts a credential on an ordinary input.
+
+Writing the refresh token into the host's `SecretsStore` was considered and rejected: `sdk.Secrets`
+is deliberately read-only, it is the seam a future per-library permission check would sit behind,
+and a node library that writes to the credential store is exactly what that seam exists to be able
+to say no to later. With Secret Loaders wired there is nothing to gain from it anyway — logging in
+again is one round trip.
 
 **Holding the TOTP seed collapses two factors into one.** It is worth it for a machine that trades on
 its own and not worth it for one a person drives by hand, which is why `MFA Secret` is optional and
 the app-approval path exists beside it.
+
+**The account node still does not reconnect by itself on load.** With Secret Loaders wired it could
+— the credentials would be there — so this is a choice rather than a limitation: a brokerage session
+re-establishing itself the moment a file is opened is not a thing to do quietly. A graph that should
+log itself in wires a startup trigger into **Connect**, where it is visible on the canvas.
 
 ## 5. Dry Run is on by default
 

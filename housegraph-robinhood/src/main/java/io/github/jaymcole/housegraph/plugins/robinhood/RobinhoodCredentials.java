@@ -8,10 +8,11 @@ import java.util.UUID;
  * <p>
  * <b>This is never stored, logged or put in a message.</b> It is built from the node's inputs at
  * the moment a Connect runs and held by the live {@link RobinhoodSession} only so that an expired
- * session can log in again without a person present. HouseGraph does not write a
- * {@code markSecret()} input's value to a save file, so nothing here reaches disk through this
- * library either — which is also why a reloaded graph has to be given its password again before it
- * can connect. That trade is argued in {@code docs/design/robinhood-unofficial-api.md}.
+ * session can log in again without a person present. Nothing here reaches disk: HouseGraph does not
+ * write a {@code markSecret()} input's value to a save file, and all three of the credential ports
+ * are marked. A graph that should reconnect after a restart wires its credentials from Secret
+ * Loader nodes, which persist the key and resolve the value fresh on every run — see
+ * {@code docs/design/robinhood-unofficial-api.md}.
  *
  * @param username the Robinhood login, usually an email address
  * @param password the Robinhood password
