@@ -1,0 +1,20 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-robinhood'
+    libraryName = 'Robinhood'
+    description = 'Reads a Robinhood brokerage account and places equity orders through Robinhood\'s own (unofficial, undocumented) mobile API.'
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.robinhood.nodes']
+}
+
+// No dependencies, deliberately. Robinhood is spoken to over plain HTTPS with
+// java.net.http.HttpClient, and org.json - the only JSON this needs - comes from housegraph-api
+// (compileOnly here, supplied by the host at runtime). Nothing is bundled, so there is nothing to
+// relocate and nothing to collide with another library's copy.
+//
+// The alternative was a ready-made Robinhood client library. There isn't a maintained Java one,
+// and the Python ones (robin_stocks and friends) are not reachable from here; what they encode is
+// a handful of URLs and payload shapes, which is cheaper to write down in RobinhoodApi than to
+// bundle a runtime for. See docs/design/robinhood-unofficial-api.md.
