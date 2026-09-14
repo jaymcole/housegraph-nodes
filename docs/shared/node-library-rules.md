@@ -20,7 +20,7 @@ collected rather than left to be rediscovered.
 ## 1. `compileOnly` the API — never `implementation`
 
 ```groovy
-compileOnly 'com.github.jaymcole:HouseGraph:v0.2.0'
+compileOnly 'com.github.jaymcole:HouseGraph:v2.0.0'
 ```
 
 HouseGraph supplies `housegraph-api` and its transitive `org.json` and `slf4j-api`
@@ -70,7 +70,35 @@ name. Two things follow:
 
 You cannot fix either after the fact without asking users to hand-edit save files.
 
-## 5. Apply the JavaFX Gradle plugin
+## 5. Tag every node so search can find it
+
+```java
+@Display.Name("Send Message")
+@Display.Description("Posts a message to a Discord channel.")
+@Node.Kind(NodeKind.ACTION)
+@Node.Keywords({"discord", "post", "chat", "say", "notify"})
+```
+
+HouseGraph ranks nodes by their name, class name, description, keywords, category and
+library. Skip these and your node is findable only by someone who already knows what it
+is called — which, in a list of every installed library's nodes, is nobody.
+
+- **`@Node.Keywords` does the most work.** It is what surfaces your node to a user
+  searching for the words they would use rather than the words you chose.
+- **`@Node.Kind` is the node's role** — `ACTION`, `CONTROL`, `RESOURCE` or `DATA` — not
+  its category. Category is your `categoryPrefix` and menu position; kind cuts across it.
+
+**A node with no `@Node.Kind` matches no `kind:` search at all.** Nothing is inferred
+from your category path, because it is yours to name and means nothing to the host. The
+only fallback is `AutoStartable`, which implies `RESOURCE`.
+
+These three annotations landed in **v1.1.0**. Against an earlier API they will not
+compile — check the version you pinned in rule 1.
+
+Note the same `javafx.scene.Node` collision that bites `@Node.Type` (see rule 4 and the
+section below) applies to `@Node.Kind` and `@Node.Keywords`.
+
+## 6. Apply the JavaFX Gradle plugin
 
 ```groovy
 plugins { id 'org.openjfx.javafxplugin' version '...' }
@@ -81,7 +109,7 @@ purpose, so a release built on Linux cannot pin the wrong natives into your buil
 The consequence is that the unclassified artifacts OpenJFX publishes are ~300-byte
 stubs. Without the plugin you get `package javafx.scene does not exist`.
 
-## 6. Exclude `slf4j-api` from every dependency that pulls it
+## 7. Exclude `slf4j-api` from every dependency that pulls it
 
 ```groovy
 implementation('net.dv8tion:JDA:5.x') {
@@ -97,15 +125,77 @@ the one you declared.** JDA and jmdns each need one. DJL needs three — `ai.djl
 their own transitive path to `ai.djl:api`, so an exclude on one does not cover
 another. Check with `gradlew :yourlib:dependencies` before you build.
 
+## 8. A node with a Start/Stop lifecycle must survive having no UI
+
+`createNodeContent()` runs only when something draws your node, so every field it
+assigns is null otherwise — and "otherwise" is not only a headless run: a graph used
+from inside another graph has no view for its interior nodes while the app around it
+is fully windowed. **Whether a node has a view is a question about that node, never
+about the process.** Do not key any of this off `sdk.RuntimeMode.isDaemon()`, which
+answers whether a supervisor started the JVM.
+
+```java
+private volatile boolean running;                       // 1. not "timeline != null"
+private final NodeTimer clock = new NodeTimer("MyBot"); // 2. not a Timeline
+
+private void start() {
+    running = true;
+    connect();
+    clock.start(30_000, this::heartbeat);
+    present(() -> status.setText("Connected"));         // 3. not a bare setText
+}
+
+@Override public Map<String, String> saveState() {
+    return running ? Map.of("running", "true") : Map.of();
+}
+
+@Override protected void onRemoved() {
+    running = false;
+    clock.stop();
+}
+```
+
+1. **Own the running flag.** A field on the node. A `saveState()` that reports
+   `running` by testing whether a control or a `Timeline` exists is reading the UI,
+   and `AutoStartable` then cannot round-trip through a loader that built none.
+2. **`sdk.NodeTimer`, not `javafx.animation.Timeline`**, which ticks only while the
+   toolkit runs. `NodeTimer` ticks wherever the node is: a shared daemon scheduler,
+   one virtual thread per tick, a tick skipped rather than overlapped if its
+   predecessor is still running. `stop()` is idempotent and immediate, so it belongs
+   in `onRemoved()`.
+3. **`BaseNode.present(Runnable)` for every control update.** It runs the block
+   through the sink the node's view installed and discards it when there is no view.
+   The host runs it inline if you are already on the FX thread and marshals it there
+   if you are not — which is what makes a `NodeTimer` tick safe to show something.
+   Read your node's state *inside* the block; it may run later than the call.
+   `BaseNode.hasView()` asks the question directly, for skipping work that exists
+   only to feed a control.
+
+`AutoStartable.autoStartIfWasRunning()` is where this pays off: **its thread is the
+loader's**, not promised to be the FX thread, and the node it reaches may never have
+been drawn.
+
+These are **additions** to the API — against an older version they will not compile,
+so bump the version you pinned in rule 1. Nothing forces the change: a library that
+ignores them behaves exactly as it always has in a window, and stays exactly as
+broken outside one. Outside one is no longer hypothetical: `housegraph run --headless
+<graph>` loads a graph with no canvas, and a node that skips these throws a
+`NullPointerException` out of its own `start()` the moment that runner resumes it.
+The runner survives it — the node is left stopped, the rest of the graph runs, and
+the log names the node and this file — but that node does nothing until the library
+is fixed.
+
 ---
 
 ## Things that will bite you otherwise
 
-**Do not import `javafx.scene.Node`.** `@Node.Type` comes from
-`io.github.jaymcole.housegraph.annotations.Node`, and
+**Do not import `javafx.scene.Node`.** `@Node.Type`, `@Node.Kind` and
+`@Node.Keywords` all come from `io.github.jaymcole.housegraph.annotations.Node`, and
 `NodeContentProvider.createNodeContent()` returns `javafx.scene.Node`. Both are
-named `Node`. Write `javafx.scene.Node` fully qualified at each use. This only bites
-when a node combines the two, so it is easy to miss until it happens.
+named `Node`. Write `javafx.scene.Node` fully qualified at each use, or import the
+nested annotation types directly (`import ...annotations.Node.Kind;`) and write
+`@Kind(...)`. This only bites when a node combines the two, so it is easy to miss until
+it happens — and now that every node should be tagged, it happens more often.
 
 **A node's static initializer runs at first instantiation, not at discovery.** The
 host loads classes with `initialize = false`. So a type registered from a static
@@ -120,12 +210,32 @@ a socket bind, an HTTP call, a gateway login — does: keep it off the FX thread
 hop back to show the result.
 
 **Split your teardown.** `onRemoved()` runs on the removing thread and is not time
-bounded — use it for fast, thread-affine work such as stopping a `Timeline` or
+bounded — use it for fast, thread-affine work such as stopping a `NodeTimer` or
 unregistering a name. Anything that waits on the outside world (reaping a child
 process, withdrawing an mDNS registration, logging a client out) goes in
 `releaseResources()`, which runs on a worker under a per-node limit, concurrently
 with every other node's. Both must be idempotent, and both must work even if the
 node's UI was never built.
+
+**Throwing out of `process()` is how a node reports failure, and the engine acts on
+it.** This is the behaviour of **v2.0.0** and later; against an earlier API a throw was
+logged and the run cascaded downstream anyway, which is why older nodes sometimes
+activate a port defensively before the work that might fail. Every node has an engine-owned `Error` flow-out and an `Error Message` output
+you do not declare. Under the default `FailurePolicy.HALT` a throw fires the `Error`
+port, halts the branch, and **discards any port you activated before throwing** — so
+a node no longer has to call `activate` ahead of the work that might fail to stop a
+failure looking like a success. Throw with a message worth reading: it becomes
+`Error Message`, and it is all a handler gets.
+
+The corollary is that **catching an exception and returning normally is now a lie.**
+It tells the engine the node succeeded, and everything downstream runs against
+outputs the node never set. If a failure is genuinely not a failure — a poll that
+found nothing — say so with a port, not with a silent return.
+
+**Mark an input `required()` when the node is meaningless without it.** A required
+input whose producer failed fails your node too, before `process()` runs. An optional
+one does not. This is what keeps a send from running against the last image a camera
+successfully took.
 
 **The asset name matters if you publish several libraries from one repository.**
 HouseGraph matches a library to its jar as `<pluginId>-<version>-all.jar`. With a
@@ -141,14 +251,14 @@ Everything in `housegraph-api`:
 | Package | Provides |
 | --- | --- |
 | `graph` | `BaseNode`, `NodeVariable`, `FlowPort`, `Edge`, `ProcessContext`, `ExecutionPolicy`, `TypeConverters` |
-| `annotations` | `@Display.Name`, `@Node.Type`, `@Node.Disabled` |
-| `sdk` | `NodeContentProvider` (inline JavaFX UI), `AutoStartable` (resume on load), `ValueEditors`, `Secrets` |
+| `annotations` | `@Display.Name`, `@Display.Description`, `@Node.Type`, `@Node.Kind`, `@Node.Keywords`, `@Node.Disabled` |
+| `sdk` | `NodeContentProvider` (inline JavaFX UI), `AutoStartable` (resume on load), `NodeTimer` (a toolkit-free clock), `NodePresentation` (behind `BaseNode.present`), `ValueEditors`, `Secrets`, `RuntimeMode` |
 | `logging` | `Log.get(YourClass.class)` — lands in HouseGraph's own log window and file |
 | `resource` | `ResourceRegistry` — long-lived resources referenced by name rather than wired |
 | `storage`, `store` | `AppDirectories`, `SecretsStore`, `JsonDocumentStore` |
 
-The three `sdk` extension points are dispatched by the host with `instanceof`, so
-implementing one is the entire opt-in. **Resolve secrets through `sdk.Secrets`**,
+`NodeContentProvider`, `AutoStartable` and `ValueEditors` are dispatched by the host
+with `instanceof`, so implementing one is the entire opt-in. **Resolve secrets through `sdk.Secrets`**,
 not `SecretsStore` directly — it does nothing different today, but it is the seam a
 per-library grant would be added behind.
 
@@ -210,9 +320,13 @@ not need.
 - [ ] Every bundled dependency has a `relocate` line
 - [ ] `mergeServiceFiles()` kept
 - [ ] Every node has `@Node.Type`, prefixed with the library id
+- [ ] Every node has `@Node.Kind`, `@Display.Description` and `@Node.Keywords`
 - [ ] `org.openjfx.javafxplugin` applied
 - [ ] `slf4j-api` excluded from every dependency with a path to it
 - [ ] `javafx.scene.Node` never imported
 - [ ] Teardown split between `onRemoved()` and `releaseResources()`, both idempotent
+- [ ] Running state in a field, clocks on `NodeTimer`, control updates via `present(...)`
+- [ ] Failures thrown, not swallowed, and with a message worth showing a user
+- [ ] Inputs the node is meaningless without marked `required()`
 - [ ] Single jar, or assets named `<pluginId>-<version>-all.jar`
 - [ ] Built jar contains no `housegraph-api`, no `org.slf4j`, no SLF4J provider
