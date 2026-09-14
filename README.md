@@ -22,6 +22,7 @@ they just share a build and a release.
 | `housegraph-database` | Database, Insert Row, Find Rows, Update Rows, Delete Rows, SQL Query, SQL Statement | sqlite-jdbc |
 | `housegraph-datetime` | Milliseconds To Date Time | nothing |
 | `housegraph-app` | Graph Images | nothing |
+| `housegraph-robinhood` | Robinhood Account, Robinhood Account Ref, Get Quote, Account Summary, Get Positions, Place Order, Order Status, Cancel Order, Get Recent Orders | nothing |
 
 `housegraph-app` is the only library here that needs something back from the application: its
 Graph Images node asks HouseGraph to draw the open graph, which HouseGraph can only answer once it
@@ -29,6 +30,13 @@ publishes the service written down in
 [`docs/design/graph-image-service.md`](docs/design/graph-image-service.md). Until it does, the node
 installs and appears like any other, and fails a run with a sentence saying which HouseGraph it
 needs.
+
+`housegraph-robinhood` is the only library here that spends money, and the only one that talks to an
+interface nobody published: **Robinhood has no API for retail customers**, so it speaks the private
+one Robinhood's own apps use. It can stop working without notice, it is very likely against
+Robinhood's terms of service, and its Place Order node therefore ships with **Dry Run switched on**.
+Read [`docs/design/robinhood-unofficial-api.md`](docs/design/robinhood-unofficial-api.md) before
+installing it.
 
 ## Installing
 
