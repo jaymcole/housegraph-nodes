@@ -19,10 +19,15 @@ import java.nio.file.Path;
  * <p>
  * Purely flow-driven — it has no timer of its own. Wire something that fires repeatedly (e.g.
  * the host app's Repeating Trigger) into its flow-in to poll on an interval. <b>Checked</b> fires
- * every time this runs, whether or not anything changed; <b>Pulled</b> fires only when a new
- * commit actually landed, so a rebuild/restart/notify step chained off it doesn't re-run on
- * every no-op poll. The <b>Commit</b> output is set either way, to the commit the folder now
+ * on every run that reached the remote, whether or not anything changed; <b>Pulled</b> fires only
+ * when a new commit actually landed, so a rebuild/restart/notify step chained off it doesn't re-run
+ * on every no-op poll. The <b>Commit</b> output is set either way, to the commit the folder now
  * points at.
+ * <p>
+ * A sync that <em>fails</em> — no network, bad credentials, a path that isn't writable — fires
+ * neither, and fires the engine-owned <b>Error</b> port instead. Wire that to be told about a
+ * checkout that has silently stopped updating; leave it unwired and the branch simply stops, which
+ * is the right default for a poll that will try again on the next tick.
  */
 @Display.Name("Git Sync")
 @Node.Type("github.GitSyncNode")
@@ -39,9 +44,11 @@ public class GitSyncNode extends BaseNode {
 
     @Override
     public void process(ProcessContext ctx) {
-        // Activated before the sync attempt: if it throws below, Pulled is never activated, and
-        // because Checked already is, the engine's "activated nothing -> fire everything" default
-        // (see BaseNode.activate) can't kick in and make a failed check look like a successful pull.
+        // Ordering is readability, not defence. A throw below routes this firing to the engine's
+        // Error port and discards every activation made before it (FailurePolicy.HALT), so an
+        // already-activated Checked cannot make a failed sync look like a successful one. This call
+        // used to sit here specifically to defend against the "activated nothing -> fire everything"
+        // default; that is now the engine's job.
         activate(checked);
 
         String url = repositoryUrl.getValue();
