@@ -1,0 +1,26 @@
+plugins {
+    id 'housegraph-node-library'
+}
+
+nodeLibrary {
+    id = 'housegraph-alpaca'
+    libraryName = 'Alpaca'
+    description = 'Trades stocks and ETFs through Alpaca\'s documented REST API - paper or live - and reads quotes, bars, positions and orders.'
+
+    // ONE root package, not the three subpackages under it. NodeRegistry scans a root recursively
+    // and derives each node's Add-Node menu category from its path *below that root*, which gives
+    // alpaca / alpaca.market / alpaca.portfolio / alpaca.orders. Naming the subpackages here
+    // instead would make each of them its own scan root - an empty path - and collapse the lot
+    // back into one flat "alpaca" menu.
+    nodePackages = ['io.github.jaymcole.housegraph.plugins.alpaca.nodes']
+}
+
+// No dependencies, deliberately. Alpaca is plain HTTPS with two headers, so java.net.http.HttpClient
+// covers it, and org.json - the only JSON this needs - comes from housegraph-api (compileOnly here,
+// supplied by the host at runtime). Nothing is bundled, so there is nothing to relocate and nothing
+// to collide with another library's copy.
+//
+// Alpaca does publish a Java SDK (alpaca-java), and bundling it was the alternative. It pulls
+// Jackson, OkHttp and their transitive graphs into a shaded jar that every other installed library
+// shares a class loader with - for a dozen URLs and two headers. What this library actually needs
+// from an SDK is written down in AlpacaApi and Orders, where a changed endpoint is one edit.
