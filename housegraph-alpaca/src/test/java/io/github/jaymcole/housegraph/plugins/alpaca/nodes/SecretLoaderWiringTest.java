@@ -120,9 +120,15 @@ class SecretLoaderWiringTest {
         alpaca.close();
     }
 
+    /** Fires the trigger and waits: {@code execute} hands the pass to the engine's executor. */
+    private void connect() {
+        graph.execute(trigger);
+        graph.awaitIdle();
+    }
+
     @Test
     void theKeysAreResolvedFromTheLoadersAndTheAccountConnects() {
-        graph.execute(trigger);
+        connect();
 
         assertTrue(account.session().isConnected(), String.valueOf(account.getLastError()));
         assertEquals(1, keyId.resolutions);
@@ -136,7 +142,7 @@ class SecretLoaderWiringTest {
         // The trap this pins down: isPersistentValue() is a flag set at construction, so an
         // unmarked input would write the value a Secret Loader had just fetched straight into the
         // graph file - which is the one thing fetching it from the store was meant to avoid.
-        graph.execute(trigger);
+        connect();
 
         assertEquals("PKTESTKEYID", input("API Key ID").getValue(), "the value did arrive");
         assertFalse(input("API Key ID").isPersistentValue());
@@ -145,8 +151,8 @@ class SecretLoaderWiringTest {
 
     @Test
     void theKeysAreReResolvedOnEveryConnectSoARotatedKeyTakesEffect() {
-        graph.execute(trigger);
-        graph.execute(trigger);
+        connect();
+        connect();
 
         assertEquals(2, keyId.resolutions);
         assertEquals(2, secretKey.resolutions);
