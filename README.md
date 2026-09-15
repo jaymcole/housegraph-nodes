@@ -23,6 +23,7 @@ they just share a build and a release.
 | `housegraph-datetime` | Milliseconds To Date Time | nothing |
 | `housegraph-app` | Graph Images | nothing |
 | `housegraph-robinhood` | Robinhood Account, Robinhood Account Ref, Get Quote, Account Summary, Get Positions, Place Order, Order Status, Cancel Order, Get Recent Orders | nothing |
+| `housegraph-alpaca` | Alpaca Account, Alpaca Account Ref<br>**market:** Get Quote, Get Bars, Market Clock<br>**portfolio:** Account Summary, Get Positions, Close Position<br>**orders:** Place Order, Order Status, Cancel Order, Get Recent Orders | nothing |
 
 `housegraph-app` is the only library here that needs something back from the application: its
 Graph Images node asks HouseGraph to draw the open graph, which HouseGraph can only answer once it
@@ -31,12 +32,24 @@ publishes the service written down in
 installs and appears like any other, and fails a run with a sentence saying which HouseGraph it
 needs.
 
-`housegraph-robinhood` is the only library here that spends money, and the only one that talks to an
-interface nobody published: **Robinhood has no API for retail customers**, so it speaks the private
-one Robinhood's own apps use. It can stop working without notice, it is very likely against
-Robinhood's terms of service, and its Place Order node therefore ships with **Dry Run switched on**.
-Read [`docs/design/robinhood-unofficial-api.md`](docs/design/robinhood-unofficial-api.md) before
-installing it.
+`housegraph-robinhood` and `housegraph-alpaca` are the two libraries here that spend money, and the
+choice between them is not about features:
+
+- **`housegraph-alpaca` talks to a published API.** Alpaca issues the keys, documents the endpoints,
+  and — the part that matters most here — runs a **paper-trading account** with its own separate key
+  pair, so a whole strategy can be built and exercised against real prices with nothing at stake. The
+  Alpaca Account node therefore ships with **Paper Trading switched on**, and Place Order and Close
+  Position ship with **Dry Run switched on**.
+  [`docs/design/alpaca-paper-and-live.md`](docs/design/alpaca-paper-and-live.md) is what those two
+  switches are and why there are two of them.
+- **`housegraph-robinhood` talks to an interface nobody published.** **Robinhood has no API for
+  retail customers**, so it speaks the private one Robinhood's own apps use. It can stop working
+  without notice, it is very likely against Robinhood's terms of service, there is no paper account
+  to rehearse against, and its Place Order node therefore ships with **Dry Run switched on**. Read
+  [`docs/design/robinhood-unofficial-api.md`](docs/design/robinhood-unofficial-api.md) before
+  installing it.
+
+If the question is only "which one should I automate against", the answer is Alpaca.
 
 ## Installing
 
