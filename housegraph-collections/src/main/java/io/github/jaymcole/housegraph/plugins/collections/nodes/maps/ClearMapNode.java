@@ -20,7 +20,8 @@ import java.util.Map;
  * See {@code AddToCollectionNode}'s class documentation for why that guarantee matters.
  * <p>
  * <b>Being pulled for data does nothing.</b> A downstream node resolving Map or Count without any
- * flow arriving here republishes the current contents rather than clearing them.
+ * flow arriving here republishes the current contents rather than clearing them — but, for the
+ * reason {@link PutInMapNode} gives, read the map through {@link GetNamedMapNode} instead.
  */
 @Display.Name("Clear Map")
 @Display.Description("Empties the named collection and republishes it empty.")
