@@ -91,11 +91,17 @@ public class DiscordBotNode extends BaseNode implements NodeContentProvider, Aut
     private String registeredName;
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Bot Name", String.class, true)
+                    .describedAs("The ResourceRegistry broadcast key a Discord Bot Ref node matches "
+                            + "by name to find this bot without a wire."), DEFAULT_NAME);
     private final NodeVariable<String> tokenSecretInput =
-            new NodeVariable<>("Token Secret", String.class, true).required().markSecret();
+            new NodeVariable<>("Token Secret", String.class, true).required().markSecret()
+                    .describedAs("Carries the resolved token itself, not a store key — wire a Secret "
+                            + "Loader node into it rather than typing the token in directly.");
     private final NodeVariable<String> guildIdInput =
-            new NodeVariable<>("Guild ID", String.class, true);
+            new NodeVariable<>("Guild ID", String.class, true)
+                    .describedAs("Scopes slash-command registration to one Discord server. Blank is "
+                            + "a valid, normal state — commands register globally instead.");
     private final NodeVariable<DiscordBot> botOutput =
             withDefault(new NodeVariable<>("Bot", DiscordBot.class).transientValue(), bot);
 

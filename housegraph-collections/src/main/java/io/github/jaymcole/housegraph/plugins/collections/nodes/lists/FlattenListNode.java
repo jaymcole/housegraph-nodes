@@ -32,7 +32,9 @@ public class FlattenListNode extends BaseNode {
     private static final int MAXIMUM_DEPTH = 32;
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<Integer> depth = new NodeVariable<>("Depth", Integer.class, true);
+    private final NodeVariable<Integer> depth = new NodeVariable<>("Depth", Integer.class, true)
+            .describedAs("How many levels of nesting to unpack. 1 unpacks one level; 0 or negative unpacks "
+                    + "all the way down.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
 

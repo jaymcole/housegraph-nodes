@@ -34,8 +34,10 @@ import java.util.Set;
 @Node.Type("collections.SetUnionNode")
 public class SetUnionNode extends BaseNode {
 
-    private final NodeVariable<Set<?>> a = new NodeVariable<>("A", Sets.TYPE);
-    private final NodeVariable<Set<?>> b = new NodeVariable<>("B", Sets.TYPE);
+    private final NodeVariable<Set<?>> a = new NodeVariable<>("A", Sets.TYPE)
+            .describedAs("Order matters: on a shared member, A's object survives. Unwired reads as empty.");
+    private final NodeVariable<Set<?>> b = new NodeVariable<>("B", Sets.TYPE)
+            .describedAs("Same operand-order reasoning as A; this is the second operand.");
 
     private final NodeVariable<Set<?>> result = new NodeVariable<>("Set", Sets.TYPE);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);

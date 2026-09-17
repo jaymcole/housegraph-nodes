@@ -41,9 +41,12 @@ import java.util.Map;
 @Node.Type("discord.DiscordCommandNode")
 public class DiscordCommandNode extends BaseNode implements NodeContentProvider {
 
-    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
-    private final NodeVariable<String> args = new NodeVariable<>("Args", String.class);
-    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class);
+    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required()
+            .describedAs("Wire a Discord Bot (or Discord Bot Ref) node's Bot output.");
+    private final NodeVariable<String> args = new NodeVariable<>("Args", String.class)
+            .describedAs("Everything after the matched command token, trimmed.");
+    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class)
+            .describedAs("The numeric channel ID, not a channel name.");
     private final NodeVariable<String> senderId = new NodeVariable<>("Sender ID", String.class);
     private final NodeVariable<String> senderName = new NodeVariable<>("Sender Name", String.class);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

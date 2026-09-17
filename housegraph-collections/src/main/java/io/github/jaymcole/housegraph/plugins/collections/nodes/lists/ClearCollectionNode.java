@@ -32,7 +32,9 @@ import java.util.List;
 @Node.Type("collections.ClearCollectionNode")
 public class ClearCollectionNode extends BaseNode {
 
-    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required();
+    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required()
+            .describedAs("A shared key, not a wire — the same named-collection concept as Add To "
+                    + "Collection's Name.");
 
     private final NodeVariable<List<?>> collected = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);

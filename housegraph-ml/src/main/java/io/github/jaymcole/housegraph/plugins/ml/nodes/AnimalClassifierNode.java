@@ -54,15 +54,26 @@ public class AnimalClassifierNode extends BaseNode {
     private static final float DEFAULT_THRESHOLD = 0.1f;
 
     private final NodeVariable<Image> imageIn = new NodeVariable<>("Image", Image.class).required();
-    private final NodeVariable<Float> threshold = new NodeVariable<>("Threshold", Float.class, true);
+    private final NodeVariable<Float> threshold = new NodeVariable<>("Threshold", Float.class, true)
+            .describedAs("Minimum confidence, 0 to 1, for the top prediction to count. Default 0.1.");
 
-    private final NodeVariable<String> category = new NodeVariable<>("Category", String.class);
-    private final NodeVariable<Float> confidence = new NodeVariable<>("Confidence", Float.class);
-    private final NodeVariable<Float> isSquirrel = new NodeVariable<>("Is Squirrel", Float.class);
-    private final NodeVariable<Float> isBird = new NodeVariable<>("Is Bird", Float.class);
+    private final NodeVariable<String> category = new NodeVariable<>("Category", String.class)
+            .describedAs("The verdict: squirrel, bird, other, or none. Fixed vocabulary — nothing else "
+                    + "is ever reported.");
+    private final NodeVariable<Float> confidence = new NodeVariable<>("Confidence", Float.class)
+            .describedAs("The winning category's probability, 0 to 1. When Category is none, this is "
+                    + "the model's top guess falling short of Threshold rather than any animal's "
+                    + "confidence.");
+    private final NodeVariable<Float> isSquirrel = new NodeVariable<>("Is Squirrel", Float.class)
+            .describedAs("1 or 0, not the actual confidence — a Float rather than a Boolean so it drops "
+                    + "straight into an If node.");
+    private final NodeVariable<Float> isBird = new NodeVariable<>("Is Bird", Float.class)
+            .describedAs("1 or 0, for the same reason as Is Squirrel.");
     @SuppressWarnings("unchecked")
     private final NodeVariable<List<String>> objects =
-            new NodeVariable<>("Objects", (Class<List<String>>) (Class<?>) List.class);
+            new NodeVariable<>("Objects", (Class<List<String>>) (Class<?>) List.class)
+                    .describedAs("The model's raw top-K labels with confidence baked in, e.g. "
+                            + "\"fox squirrel (87%)\" — species-level detail, not bounding boxes.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

@@ -39,10 +39,15 @@ import java.util.StringJoiner;
 public class JoinMapNode extends BaseNode {
 
     private final NodeVariable<Map<?, ?>> map = new NodeVariable<>("Map", Maps.TYPE).required();
-    private final NodeVariable<String> template = new NodeVariable<>("Template", String.class, true).required();
-    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true);
-    private final NodeVariable<String> prefix = new NodeVariable<>("Prefix", String.class, true);
-    private final NodeVariable<String> suffix = new NodeVariable<>("Suffix", String.class, true);
+    private final NodeVariable<String> template = new NodeVariable<>("Template", String.class, true).required()
+            .describedAs("Uses the {key}/{value} placeholder syntax; not derivable from the name.");
+    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true)
+            .describedAs("Unescaped — typed \\n becomes a real newline. Defaults to a newline.");
+    private final NodeVariable<String> prefix = new NodeVariable<>("Prefix", String.class, true)
+            .describedAs("Text before the whole result, unescaped the same way as Separator. Blank means "
+                    + "none.");
+    private final NodeVariable<String> suffix = new NodeVariable<>("Suffix", String.class, true)
+            .describedAs("Text after the whole result, unescaped the same way as Prefix.");
 
     private final NodeVariable<String> result = new NodeVariable<>("Text", String.class);
 

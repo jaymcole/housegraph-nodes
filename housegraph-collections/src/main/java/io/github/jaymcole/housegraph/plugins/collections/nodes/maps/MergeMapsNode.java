@@ -32,11 +32,14 @@ import java.util.Map;
 @Node.Type("collections.MergeMapsNode")
 public class MergeMapsNode extends BaseNode {
 
-    private final NodeVariable<Map<?, ?>> base = new NodeVariable<>("Base", Maps.TYPE);
-    private final NodeVariable<Map<?, ?>> overrides = new NodeVariable<>("Overrides", Maps.TYPE);
+    private final NodeVariable<Map<?, ?>> base = new NodeVariable<>("Base", Maps.TYPE)
+            .describedAs("On a shared key, Overrides wins, not Base.");
+    private final NodeVariable<Map<?, ?>> overrides = new NodeVariable<>("Overrides", Maps.TYPE)
+            .describedAs("Wins over Base on a shared key. Unwired reads as empty.");
 
     private final NodeVariable<Map<?, ?>> result = new NodeVariable<>("Map", Maps.TYPE);
-    private final NodeVariable<Integer> overridden = new NodeVariable<>("Overridden", Integer.class);
+    private final NodeVariable<Integer> overridden = new NodeVariable<>("Overridden", Integer.class)
+            .describedAs("The count of keys Overrides actually took over — not the total merged size.");
 
     @Override
     public void process(ProcessContext ctx) {

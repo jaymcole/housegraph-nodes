@@ -39,10 +39,13 @@ import java.util.Map;
 public class MapGetNode extends BaseNode {
 
     private final NodeVariable<Map<?, ?>> map = new NodeVariable<>("Map", Maps.TYPE).required();
-    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true).required();
-    private final NodeVariable<Object> fallback = new NodeVariable<>("Default", Object.class);
+    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true).required()
+            .describedAs("Lookup is by text form — \"3\" matches a stored 3.");
+    private final NodeVariable<Object> fallback = new NodeVariable<>("Default", Object.class)
+            .describedAs("Used only when the key is missing. Doesn't affect Found.");
 
-    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class);
+    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class)
+            .describedAs("Returns Default, not null, when the key is missing.");
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
 
     @Override

@@ -66,6 +66,7 @@ public class DeleteRowsNode extends ConditionsNode {
     @Override
     public void configureInputs() {
         addInput(databaseInput);
+        tableInput.describedAs("A table that doesn't exist yet deletes nothing and is not an error.");
         addInput(tableInput);
         addConditionInputs();
     }

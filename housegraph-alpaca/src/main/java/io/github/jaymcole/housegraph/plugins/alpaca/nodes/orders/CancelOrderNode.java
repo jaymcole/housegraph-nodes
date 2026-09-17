@@ -46,10 +46,14 @@ public class CancelOrderNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<String> orderIdInput =
             new NodeVariable<>("Order ID", String.class, true).required();
 
-    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class);
+    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class)
+            .describedAs("The order's raw status after the cancel attempt. A cancel can race a fill, "
+                    + "so this is not necessarily \"cancelled\".");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
     private final NodeVariable<Double> filledQuantityOutput =
-            new NodeVariable<>("Filled Quantity", Double.class);
+            new NodeVariable<>("Filled Quantity", Double.class)
+                    .describedAs("Shares filled, possibly fractional. Can be nonzero even on a Too "
+                            + "Late outcome - the order filled before the cancel caught up with it.");
     private final NodeVariable<Boolean> wasCancelledOutput =
             new NodeVariable<>("Was Cancelled", Boolean.class);
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);

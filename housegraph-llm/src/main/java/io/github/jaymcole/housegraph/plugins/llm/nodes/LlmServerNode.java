@@ -110,22 +110,43 @@ public class LlmServerNode extends BaseNode implements NodeContentProvider, Auto
     private final LlmServerProcess server = new LlmServerProcess();
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Name", String.class, true), LlmServerSpec.DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Name", String.class, true), LlmServerSpec.DEFAULT_NAME)
+                    .describedAs("The name this server is broadcast under in the ResourceRegistry — "
+                            + "what other nodes reference it by, as a string rather than a wire.");
     private final NodeVariable<String> commandInput =
-            withDefault(new NodeVariable<>("Command", String.class, true), LlmServerSpec.DEFAULT_COMMAND);
-    private final NodeVariable<String> directoryInput = new NodeVariable<>("Directory", String.class, true);
+            withDefault(new NodeVariable<>("Command", String.class, true), LlmServerSpec.DEFAULT_COMMAND)
+                    .describedAs("An arbitrary shell command that launches the server, typed exactly "
+                            + "as you would at a terminal: llama-server -m models/llama.gguf --port "
+                            + "8080, lms server start, vllm serve mistralai/Mistral-7B-v0.1.");
+    private final NodeVariable<String> directoryInput = new NodeVariable<>("Directory", String.class, true)
+            .describedAs("The working directory Command is launched from. Blank means this node's "
+                    + "own working directory.");
     private final NodeVariable<String> serverInput =
-            withDefault(new NodeVariable<>("Server", String.class, true), LocalLlmClient.DEFAULT_SERVER);
-    private final NodeVariable<String> apiInput = new NodeVariable<>("API", String.class, true);
+            withDefault(new NodeVariable<>("Server", String.class, true), LocalLlmClient.DEFAULT_SERVER)
+                    .describedAs("The address this node polls for readiness — the same field, and "
+                            + "the same value, as the Local LLM node's own Server.");
+    private final NodeVariable<String> apiInput = new NodeVariable<>("API", String.class, true)
+            .describedAs("Which protocol the readiness check speaks: ollama, or openai for anything "
+                    + "serving /v1/chat/completions.");
     private final NodeVariable<String> apiKeyInput =
-            new NodeVariable<>("API Key", String.class, true).markSecret();
+            new NodeVariable<>("API Key", String.class, true).markSecret()
+                    .describedAs("For a server started behind a token. Marked secret, so wire it "
+                            + "from a Secret Loader rather than typing it in.");
     private final NodeVariable<Integer> startupTimeoutInput =
             withDefault(new NodeVariable<>("Startup Timeout (s)", Integer.class, true),
-                    LlmServerSpec.DEFAULT_STARTUP_TIMEOUT_SECONDS);
+                    LlmServerSpec.DEFAULT_STARTUP_TIMEOUT_SECONDS)
+                    .describedAs("How long to wait for the server to answer its own API. Can "
+                            + "legitimately take minutes — a command that loads model weights before "
+                            + "it starts listening is still starting, not stuck.");
 
-    private final NodeVariable<String> serverOutput = new NodeVariable<>("Server", String.class);
+    private final NodeVariable<String> serverOutput = new NodeVariable<>("Server", String.class)
+            .describedAs("The address this node brought the server up on. Wire it into Local LLM's "
+                    + "own Server input, so which prompt node uses which server is visible on the "
+                    + "canvas.");
     private final NodeVariable<List<?>> modelsOutput = new NodeVariable<>("Models", LIST);
-    private final NodeVariable<Boolean> runningOutput = new NodeVariable<>("Running", Boolean.class);
+    private final NodeVariable<Boolean> runningOutput = new NodeVariable<>("Running", Boolean.class)
+            .describedAs("True whether this node started the server or merely adopted one already "
+                    + "running — which of the two it was changes what Stop and Restart do.");
 
     private final FlowPort start = new FlowPort("Start", FlowPort.Direction.IN);
     private final FlowPort stop = new FlowPort("Stop", FlowPort.Direction.IN);

@@ -65,7 +65,9 @@ public class DatabaseNode extends BaseNode implements NodeContentProvider {
     private static final String DEFAULT_NAME = "house";
 
     private final NodeVariable<Database> databaseOutput =
-            new NodeVariable<>("Database", Database.class).transientValue();
+            new NodeVariable<>("Database", Database.class).transientValue()
+                    .describedAs("The live handle keyed by this node's Name, not a snapshot — the same "
+                            + "named-resource pattern as Data Store.");
 
     private String name = DEFAULT_NAME;
 

@@ -54,12 +54,23 @@ import java.util.List;
 @Node.Type("discord.DiscordSendWebhookMessageNode")
 public class DiscordSendWebhookMessageNode extends BaseNode {
 
-    private final NodeVariable<String> webhookUrl = new NodeVariable<>("Webhook URL", String.class, true).required().markSecret();
+    private final NodeVariable<String> webhookUrl = new NodeVariable<>("Webhook URL", String.class, true).required().markSecret()
+            .describedAs("Treat this like a password — anyone holding it can post as the webhook. "
+                    + "Wire it from a Secret Loader rather than typing it in directly.");
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
-    private final NodeVariable<String> username = new NodeVariable<>("Username", String.class, true);
-    private final NodeVariable<String> avatarUrl = new NodeVariable<>("Avatar URL", String.class, true);
-    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
-    private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true);
+    private final NodeVariable<String> username = new NodeVariable<>("Username", String.class, true)
+            .describedAs("Overrides the webhook's own configured name for this message. Blank falls "
+                    + "back to the webhook's own name.");
+    private final NodeVariable<String> avatarUrl = new NodeVariable<>("Avatar URL", String.class, true)
+            .describedAs("Overrides the webhook's own configured avatar for this message. Blank falls "
+                    + "back to the webhook's own avatar.");
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class)
+            .describedAs("Accepts an image, a file path, or a list of either. Unwired means text-only, "
+                    + "and adding any attachment switches the post from a plain JSON request to a "
+                    + "multipart upload.");
+    private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true)
+            .describedAs("How long to wait for the webhook request. Blank falls back to the client's "
+                    + "own default timeout.");
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 

@@ -28,9 +28,13 @@ import java.io.IOException;
 @Node.Type("filesystem.CreateFolderNode")
 public class CreateFolderNode extends BaseNode {
 
-    private final NodeVariable<String> folder = new NodeVariable<>("Folder", String.class, true).required();
+    private final NodeVariable<String> folder = new NodeVariable<>("Folder", String.class, true).required()
+            .describedAs("A path relative to HouseGraph's storage root. / or \\ both work; a .. segment "
+                    + "is rejected.");
 
-    private final NodeVariable<String> folderPath = new NodeVariable<>("Folder Path", String.class);
+    private final NodeVariable<String> folderPath = new NodeVariable<>("Folder Path", String.class)
+            .describedAs("The resolved absolute path. Pulling it creates the folder on disk if it doesn't "
+                    + "exist yet.");
 
     @Override
     public void process(ProcessContext ctx) {

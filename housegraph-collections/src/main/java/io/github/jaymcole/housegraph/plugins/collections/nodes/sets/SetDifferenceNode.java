@@ -41,12 +41,17 @@ import java.util.Set;
 @Node.Type("collections.SetDifferenceNode")
 public class SetDifferenceNode extends BaseNode {
 
-    private final NodeVariable<Set<?>> a = new NodeVariable<>("A", Sets.TYPE);
-    private final NodeVariable<Set<?>> b = new NodeVariable<>("B", Sets.TYPE);
+    private final NodeVariable<Set<?>> a = new NodeVariable<>("A", Sets.TYPE)
+            .describedAs("Which side pairs with which output (Only in A vs. Only in B) is the entire "
+                    + "point of this node.");
+    private final NodeVariable<Set<?>> b = new NodeVariable<>("B", Sets.TYPE)
+            .describedAs("Same operand-to-output-mapping reasoning as A.");
 
     private final NodeVariable<Set<?>> onlyInA = new NodeVariable<>("Only in A", Sets.TYPE);
     private final NodeVariable<Set<?>> onlyInB = new NodeVariable<>("Only in B", Sets.TYPE);
-    private final NodeVariable<Boolean> changed = new NodeVariable<>("Changed", Boolean.class);
+    private final NodeVariable<Boolean> changed = new NodeVariable<>("Changed", Boolean.class)
+            .describedAs("True when either side has anything unique to it — false only when both sets "
+                    + "are identical.");
 
     @Override
     public void process(ProcessContext ctx) {

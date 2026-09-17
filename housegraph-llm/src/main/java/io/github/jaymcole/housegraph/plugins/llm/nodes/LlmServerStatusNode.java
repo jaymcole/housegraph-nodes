@@ -57,16 +57,26 @@ public class LlmServerStatusNode extends BaseNode {
     private static final Class<List<?>> LIST = (Class<List<?>>) (Class<?>) List.class;
 
     private final NodeVariable<String> serverInput =
-            withDefault(new NodeVariable<>("Server", String.class, true), LocalLlmClient.DEFAULT_SERVER);
-    private final NodeVariable<String> apiInput = new NodeVariable<>("API", String.class, true);
+            withDefault(new NodeVariable<>("Server", String.class, true), LocalLlmClient.DEFAULT_SERVER)
+                    .describedAs("The address this node polls, the same one Local LLM's Server "
+                            + "points at.");
+    private final NodeVariable<String> apiInput = new NodeVariable<>("API", String.class, true)
+            .describedAs("Which protocol the check speaks: ollama, or openai for anything serving "
+                    + "/v1/chat/completions.");
     private final NodeVariable<String> apiKeyInput =
-            new NodeVariable<>("API Key", String.class, true).markSecret();
+            new NodeVariable<>("API Key", String.class, true).markSecret()
+                    .describedAs("For a server started behind a token. Marked secret, so wire it "
+                            + "from a Secret Loader rather than typing it in.");
     private final NodeVariable<Integer> timeoutInput =
             withDefault(new NodeVariable<>("Timeout (s)", Integer.class, true),
-                    LlmModels.DEFAULT_STATUS_TIMEOUT_SECONDS);
+                    LlmModels.DEFAULT_STATUS_TIMEOUT_SECONDS)
+                    .describedAs("How long to wait for an answer. Deliberately short — a local "
+                            + "server that has not answered by then is not going to.");
 
     private final NodeVariable<Boolean> runningOutput = new NodeVariable<>("Running", Boolean.class);
-    private final NodeVariable<List<?>> modelsOutput = new NodeVariable<>("Models", LIST);
+    private final NodeVariable<List<?>> modelsOutput = new NodeVariable<>("Models", LIST)
+            .describedAs("What the server reports having. Empty both when the server is down and "
+                    + "when it is up with nothing installed — read Running to tell those two apart.");
     private final NodeVariable<String> detailOutput = new NodeVariable<>("Detail", String.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

@@ -29,11 +29,16 @@ import io.github.jaymcole.housegraph.store.JsonDocumentStore;
 public class ClearStoredValueNode extends BaseNode {
 
     private final NodeVariable<JsonDocumentStore> storeInput =
-            new NodeVariable<>("Store", JsonDocumentStore.class).transientValue().required();
-    private final NodeVariable<String> keyInput = new NodeVariable<>("Key", String.class, true).required();
+            new NodeVariable<>("Store", JsonDocumentStore.class).transientValue().required()
+                    .describedAs("Must be wired from a Data Store node's output.");
+    private final NodeVariable<String> keyInput = new NodeVariable<>("Key", String.class, true).required()
+            .describedAs("A shared identifier — any node pointed at the same Store and Key addresses the "
+                    + "same entry.");
 
-    private final NodeVariable<String> value = new NodeVariable<>("Value", String.class);
-    private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
+    private final NodeVariable<String> value = new NodeVariable<>("Value", String.class)
+            .describedAs("Reads as empty text, not null, when nothing was stored — pair with Found.");
+    private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class)
+            .describedAs("Distinguishes a genuinely empty stored value from no entry at all.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

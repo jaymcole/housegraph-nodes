@@ -65,17 +65,26 @@ public class ClosePositionNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<String> symbolInput =
             new NodeVariable<>("Symbol", String.class, true).required();
     private final NodeVariable<Double> percentInput =
-            new NodeVariable<>("Percent", Double.class, true);
+            new NodeVariable<>("Percent", Double.class, true)
+                    .describedAs("Blank closes the whole position (100%). Valid range is 0 to 100.");
     private final NodeVariable<Boolean> dryRunInput =
-            withDefault(new NodeVariable<>("Dry Run", Boolean.class, true), Boolean.TRUE);
+            withDefault(new NodeVariable<>("Dry Run", Boolean.class, true), Boolean.TRUE)
+                    .describedAs("Defaults to true, for the same reason as Place Order's Dry Run: "
+                            + "nothing is sold until this is explicitly turned off.");
 
-    private final NodeVariable<String> orderIdOutput = new NodeVariable<>("Order ID", String.class);
+    private final NodeVariable<String> orderIdOutput = new NodeVariable<>("Order ID", String.class)
+            .describedAs("Null on a dry run, or when there is nothing to close.");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
-    private final NodeVariable<Double> quantityOutput = new NodeVariable<>("Quantity", Double.class);
+    private final NodeVariable<Double> quantityOutput = new NodeVariable<>("Quantity", Double.class)
+            .describedAs("Shares held. Null when there is nothing to close.");
     private final NodeVariable<Double> marketValueOutput =
-            new NodeVariable<>("Market Value", Double.class);
+            new NodeVariable<>("Market Value", Double.class)
+                    .describedAs("The whole holding's value, even when Percent is closing only part "
+                            + "of it.");
     private final NodeVariable<Double> unrealisedProfitOutput =
-            new NodeVariable<>("Unrealised P/L", Double.class);
+            new NodeVariable<>("Unrealised P/L", Double.class)
+                    .describedAs("Dollars versus cost basis for the whole holding, not just the "
+                            + "portion Percent is closing.");
     private final NodeVariable<Boolean> wasClosedOutput = new NodeVariable<>("Was Closed", Boolean.class);
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);
 

@@ -59,12 +59,17 @@ import io.github.jaymcole.housegraph.store.JsonDocumentStore;
 public class StoredValueNode extends BaseNode {
 
     private final NodeVariable<JsonDocumentStore> storeInput =
-            new NodeVariable<>("Store", JsonDocumentStore.class).transientValue().required();
-    private final NodeVariable<String> keyInput = new NodeVariable<>("Key", String.class, true).required();
-    private final NodeVariable<Object> valueInput = new NodeVariable<>("Value", Object.class);
+            new NodeVariable<>("Store", JsonDocumentStore.class).transientValue().required()
+                    .describedAs("Must be wired from a Data Store node's output.");
+    private final NodeVariable<String> keyInput = new NodeVariable<>("Key", String.class, true).required()
+            .describedAs("Same shared-identifier reasoning as Clear Stored Value's Key.");
+    private final NodeVariable<Object> valueInput = new NodeVariable<>("Value", Object.class)
+            .describedAs("A null (unwired) input leaves the stored value untouched rather than clearing it.");
 
-    private final NodeVariable<String> value = new NodeVariable<>("Value", String.class);
-    private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
+    private final NodeVariable<String> value = new NodeVariable<>("Value", String.class)
+            .describedAs("Same empty-text-vs-Found semantics as Clear Stored Value's Value output.");
+    private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class)
+            .describedAs("Same reasoning as Clear Stored Value's Found.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

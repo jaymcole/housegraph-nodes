@@ -69,7 +69,9 @@ public class BuildListNode extends BaseNode {
     public void configureInputs() {
         items.clear();
         for (int i = 1; i <= slots; i++) {
-            NodeVariable<Object> item = new NodeVariable<>("Item " + i, Object.class);
+            NodeVariable<Object> item = new NodeVariable<>("Item " + i, Object.class)
+                    .describedAs("A null value in a filled slot is dropped, the same as an unfilled "
+                            + "trailing slot.");
             items.add(item);
             addInput(item);
         }

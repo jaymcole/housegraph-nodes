@@ -42,8 +42,13 @@ import java.util.regex.Matcher;
 public class RegexFindAllNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required();
-    private final NodeVariable<Integer> group = new NodeVariable<>("Group", Integer.class, true);
+    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required()
+            .describedAs("A regular expression. Case-sensitive by default; prefix with (?i) for "
+                    + "insensitive. One that fails to compile fails the node.");
+    private final NodeVariable<Integer> group = new NodeVariable<>("Group", Integer.class, true)
+            .describedAs("Which capture group each entry is: 0, the default, is the whole match. Asking "
+                    + "for a group the pattern does not have fails the node rather than returning an "
+                    + "empty list.");
 
     private final NodeVariable<List<?>> matches = new NodeVariable<>("Matches", Texts.LIST_TYPE);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);

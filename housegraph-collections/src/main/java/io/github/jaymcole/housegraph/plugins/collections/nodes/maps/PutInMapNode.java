@@ -45,11 +45,17 @@ import java.util.Map;
 @Node.Type("collections.PutInMapNode")
 public class PutInMapNode extends BaseNode {
 
-    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required();
-    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true);
-    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class);
+    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required()
+            .describedAs("A shared, memory-only map that outlives this node — shared by any node naming "
+                    + "the same string.");
+    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true)
+            .describedAs("A blank or null key means the pair does nothing.");
+    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class)
+            .describedAs("Accepts any type. A null value means the pair does nothing.");
 
-    private final NodeVariable<Map<?, ?>> collected = new NodeVariable<>("Map", Maps.TYPE);
+    private final NodeVariable<Map<?, ?>> collected = new NodeVariable<>("Map", Maps.TYPE)
+            .describedAs("Pulling without a flow arrival republishes current contents and can silently "
+                    + "skip the put.");
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

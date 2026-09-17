@@ -26,9 +26,11 @@ import java.util.List;
 public class IndexOfNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required();
+    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required()
+            .describedAs("Text-typed on purpose, matched with a forgiving equals-or-same-text comparison.");
 
-    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class);
+    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class)
+            .describedAs("-1 means not found — a sentinel value worth checking for.");
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
 
     @Override

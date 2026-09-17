@@ -38,14 +38,22 @@ import javafx.scene.control.Label;
 public class CancelOrderNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
     private final NodeVariable<String> orderIdInput =
-            new NodeVariable<>("Order ID", String.class, true).required();
+            new NodeVariable<>("Order ID", String.class, true).required()
+                    .describedAs("Wire this from a Get Recent Orders node's Open Order IDs, or from "
+                            + "Place Order's Order ID output.");
 
-    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class);
+    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class)
+            .describedAs("The order's state exactly as Robinhood spelled it, e.g. \"cancelled\" or "
+                    + "\"queued\".");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
     private final NodeVariable<Boolean> wasCancelledOutput =
-            new NodeVariable<>("Was Cancelled", Boolean.class);
+            new NodeVariable<>("Was Cancelled", Boolean.class)
+                    .describedAs("False covers two different cases alike: the order was already "
+                            + "filled, or it is still working and the cancel hasn't caught up yet.");
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

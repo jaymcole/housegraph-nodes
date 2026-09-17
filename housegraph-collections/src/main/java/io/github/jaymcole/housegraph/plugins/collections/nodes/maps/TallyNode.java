@@ -44,7 +44,9 @@ public class TallyNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
 
-    private final NodeVariable<Map<?, ?>> counts = new NodeVariable<>("Counts", Maps.TYPE);
+    private final NodeVariable<Map<?, ?>> counts = new NodeVariable<>("Counts", Maps.TYPE)
+            .describedAs("Counted by text-form identity, so 3 and \"3\" merge. Null and blank entries are "
+                    + "skipped, not tallied.");
     private final NodeVariable<Integer> distinctCount = new NodeVariable<>("Distinct Count", Integer.class);
 
     @Override

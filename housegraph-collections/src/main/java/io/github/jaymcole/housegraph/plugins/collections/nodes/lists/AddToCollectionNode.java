@@ -43,8 +43,11 @@ import java.util.List;
 @Node.Type("collections.AddToCollectionNode")
 public class AddToCollectionNode extends BaseNode {
 
-    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required();
-    private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class);
+    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required()
+            .describedAs("A shared key, not a wire: any node naming the same text reads and writes this "
+                    + "same collection, with no edge between them.");
+    private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class)
+            .describedAs("The value to append. A null value is silently ignored — it doesn't grow the list.");
 
     private final NodeVariable<List<?>> collected = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);

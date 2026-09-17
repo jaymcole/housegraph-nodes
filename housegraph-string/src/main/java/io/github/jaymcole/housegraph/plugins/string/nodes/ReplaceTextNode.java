@@ -31,7 +31,9 @@ import io.github.jaymcole.housegraph.plugins.string.Texts;
 public class ReplaceTextNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> find = new NodeVariable<>("Find", String.class, true).required();
+    private final NodeVariable<String> find = new NodeVariable<>("Find", String.class, true).required()
+            .describedAs("A literal string to match, not a pattern. Case-sensitive. Blank replaces "
+                    + "nothing.");
     private final NodeVariable<String> replaceWith = new NodeVariable<>("Replace With", String.class, true);
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);

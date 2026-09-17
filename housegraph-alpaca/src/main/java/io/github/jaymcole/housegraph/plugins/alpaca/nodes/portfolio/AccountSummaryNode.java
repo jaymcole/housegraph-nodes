@@ -44,16 +44,26 @@ public class AccountSummaryNode extends BaseNode implements NodeContentProvider 
 
     private final NodeVariable<String> accountNumberOutput =
             new NodeVariable<>("Account Number", String.class);
-    private final NodeVariable<Double> equityOutput = new NodeVariable<>("Equity", Double.class);
+    private final NodeVariable<Double> equityOutput = new NodeVariable<>("Equity", Double.class)
+            .describedAs("Cash plus everything held, at current market value.");
     private final NodeVariable<Double> cashOutput = new NodeVariable<>("Cash", Double.class);
     private final NodeVariable<Double> buyingPowerOutput =
-            new NodeVariable<>("Buying Power", Double.class);
+            new NodeVariable<>("Buying Power", Double.class)
+                    .describedAs("What an order can actually spend right now - larger than Cash on a "
+                            + "margin account, smaller than it while a deposit is still settling.");
     private final NodeVariable<Double> marketValueOutput =
-            new NodeVariable<>("Market Value", Double.class);
-    private final NodeVariable<Double> dayChangeOutput = new NodeVariable<>("Day Change", Double.class);
+            new NodeVariable<>("Market Value", Double.class)
+                    .describedAs("The value of what's held only, excluding cash - distinct from "
+                            + "Equity, which includes it.");
+    private final NodeVariable<Double> dayChangeOutput = new NodeVariable<>("Day Change", Double.class)
+            .describedAs("Dollar change in equity versus its previous close.");
     private final NodeVariable<Double> dayChangePercentOutput =
-            new NodeVariable<>("Day Change %", Double.class);
-    private final NodeVariable<String> statusOutput = new NodeVariable<>("Status", String.class);
+            new NodeVariable<>("Day Change %", Double.class)
+                    .describedAs("A fraction, not a whole percent - the same ambiguity as Get Quote's "
+                            + "Change %: 0.012 means up 1.2%.");
+    private final NodeVariable<String> statusOutput = new NodeVariable<>("Status", String.class)
+            .describedAs("Alpaca's raw account-status string, distinct from Can Trade: an account can "
+                    + "report ACTIVE here and still refuse an order.");
     private final NodeVariable<Boolean> canTradeOutput = new NodeVariable<>("Can Trade", Boolean.class);
     private final NodeVariable<Boolean> isPaperOutput = new NodeVariable<>("Is Paper", Boolean.class);
 

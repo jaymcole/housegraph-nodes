@@ -77,13 +77,18 @@ public class NodeServerNode extends BaseNode implements NodeContentProvider, Aut
     private final NodeProcessServer server = new NodeProcessServer();
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Name", String.class, true), DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Name", String.class, true)
+                    .describedAs("Drives both the ResourceRegistry broadcast name and the mDNS "
+                            + "hostname of the served URL."), DEFAULT_NAME);
     private final NodeVariable<String> directoryInput =
             new NodeVariable<>("Directory", String.class, true).required();
     private final NodeVariable<String> commandInput =
-            withDefault(new NodeVariable<>("Command", String.class, true), DEFAULT_COMMAND);
+            withDefault(new NodeVariable<>("Command", String.class, true)
+                    .describedAs("Runs in Directory with PORT exported to the environment."), DEFAULT_COMMAND);
     private final NodeVariable<Integer> portInput =
-            withDefault(new NodeVariable<>("Port", Integer.class, true), DEFAULT_PORT);
+            withDefault(new NodeVariable<>("Port", Integer.class, true)
+                    .describedAs("Only exported as PORT and advertised over mDNS — the node doesn't "
+                            + "bind it itself."), DEFAULT_PORT);
 
     private final FlowPort start = new FlowPort("Start", FlowPort.Direction.IN);
     private final FlowPort stop = new FlowPort("Stop", FlowPort.Direction.IN);

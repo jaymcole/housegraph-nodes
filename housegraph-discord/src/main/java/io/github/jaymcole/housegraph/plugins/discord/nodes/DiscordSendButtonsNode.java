@@ -103,13 +103,18 @@ public class DiscordSendButtonsNode extends BaseNode implements NodeContentProvi
     /** Name of the flow-out fired instead of a button's own when the clicker is over their budget. */
     private static final String EXCEEDED_PORT = "Exceeded";
 
-    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
+    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required()
+            .describedAs("Wire a Discord Bot (or Discord Bot Ref) node's Bot output.");
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
-    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
-    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
+    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required()
+            .describedAs("The numeric channel ID, not a channel name.");
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class)
+            .describedAs("Accepts an image, a file path, or a list of either. Unwired means text-only.");
     private final NodeVariable<String> senderId = new NodeVariable<>("Sender ID", String.class);
     private final NodeVariable<String> senderName = new NodeVariable<>("Sender Name", String.class);
-    private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue();
+    private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue()
+            .describedAs("Only populated on a button click, not on the initial send — wire it into a "
+                    + "Discord Reply node to answer that click.");
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort sent = new FlowPort("", FlowPort.Direction.OUT);
     private final Map<String, FlowPort> buttonOutputs = new LinkedHashMap<>();

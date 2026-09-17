@@ -34,9 +34,13 @@ public class ListStatisticsNode extends BaseNode {
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
 
     private final NodeVariable<Double> sum = new NodeVariable<>("Sum", Double.class);
-    private final NodeVariable<Double> minimum = new NodeVariable<>("Minimum", Double.class);
-    private final NodeVariable<Double> maximum = new NodeVariable<>("Maximum", Double.class);
-    private final NodeVariable<Double> average = new NodeVariable<>("Average", Double.class);
+    private final NodeVariable<Double> minimum = new NodeVariable<>("Minimum", Double.class)
+            .describedAs("Null, not 0, when the list has no numeric entries — surprising for a numeric "
+                    + "output, but 0 would be a wrong minimum rather than an honest \"no value\".");
+    private final NodeVariable<Double> maximum = new NodeVariable<>("Maximum", Double.class)
+            .describedAs("Same null-not-0 reasoning as Minimum.");
+    private final NodeVariable<Double> average = new NodeVariable<>("Average", Double.class)
+            .describedAs("Same null-not-0 reasoning as Minimum.");
     private final NodeVariable<Integer> numericCount = new NodeVariable<>("Numeric Count", Integer.class);
 
     @Override

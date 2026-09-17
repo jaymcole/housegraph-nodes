@@ -27,10 +27,12 @@ import java.util.Map;
 public class MapRemoveNode extends BaseNode {
 
     private final NodeVariable<Map<?, ?>> map = new NodeVariable<>("Map", Maps.TYPE).required();
-    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true).required();
+    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true).required()
+            .describedAs("Matched by text form. A missing key isn't an error.");
 
     private final NodeVariable<Map<?, ?>> result = new NodeVariable<>("Map", Maps.TYPE);
-    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class);
+    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class)
+            .describedAs("The removed entry's value, null when the key wasn't present.");
     private final NodeVariable<Boolean> removed = new NodeVariable<>("Removed", Boolean.class);
 
     @Override

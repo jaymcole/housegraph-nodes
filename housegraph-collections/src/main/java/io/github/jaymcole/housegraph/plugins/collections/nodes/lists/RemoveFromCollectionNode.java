@@ -42,8 +42,12 @@ import java.util.List;
 @Node.Type("collections.RemoveFromCollectionNode")
 public class RemoveFromCollectionNode extends BaseNode {
 
-    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required();
-    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required();
+    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required()
+            .describedAs("A shared key, not a wire — the same named-collection concept as Add To "
+                    + "Collection's Name.");
+    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required()
+            .describedAs("Text-typed lookup value, matched with a forgiving comparison. Every matching "
+                    + "copy is removed, not just the first.");
 
     private final NodeVariable<List<?>> collected = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);

@@ -30,8 +30,10 @@ import java.util.List;
 public class SliceListNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<Integer> start = new NodeVariable<>("Start", Integer.class, true);
-    private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class, true);
+    private final NodeVariable<Integer> start = new NodeVariable<>("Start", Integer.class, true)
+            .describedAs("Zero-based. Negative counts back from the end, so -3 is the last three entries.");
+    private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class, true)
+            .describedAs("0 or blank means \"everything from Start onward,\" not zero entries.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
 

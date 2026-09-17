@@ -30,7 +30,8 @@ public class RandomItemNode extends BaseNode {
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
 
     private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class);
-    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class);
+    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class)
+            .describedAs("-1 sentinel for an empty list.");
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
 
     @Override

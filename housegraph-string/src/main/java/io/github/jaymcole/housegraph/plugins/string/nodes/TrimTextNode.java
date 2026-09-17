@@ -26,7 +26,9 @@ import io.github.jaymcole.housegraph.plugins.string.TrimMode;
 public class TrimTextNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> mode = new NodeVariable<>("Trim", String.class, true);
+    private final NodeVariable<String> mode = new NodeVariable<>("Trim", String.class, true)
+            .describedAs("Which whitespace to remove: both, start, end, or collapse — collapse trims "
+                    + "both ends and also squeezes every internal run of whitespace down to one space.");
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);
 

@@ -31,7 +31,8 @@ import java.util.Set;
 public class SetContainsNode extends BaseNode {
 
     private final NodeVariable<Set<?>> set = new NodeVariable<>("Set", Sets.TYPE).required();
-    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required();
+    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required()
+            .describedAs("Matched by text form, same as Set Remove's Item.");
 
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
 

@@ -35,9 +35,12 @@ import java.util.StringJoiner;
 public class JoinListNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true);
-    private final NodeVariable<String> prefix = new NodeVariable<>("Prefix", String.class, true);
-    private final NodeVariable<String> suffix = new NodeVariable<>("Suffix", String.class, true);
+    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true)
+            .describedAs("Typed \\n or \\t is unescaped to a real newline or tab. Defaults to \", \".");
+    private final NodeVariable<String> prefix = new NodeVariable<>("Prefix", String.class, true)
+            .describedAs("Text before the whole result. The same unescape rule as Separator applies here too.");
+    private final NodeVariable<String> suffix = new NodeVariable<>("Suffix", String.class, true)
+            .describedAs("Text after the whole result. The same unescape rule as Separator applies here too.");
 
     private final NodeVariable<String> result = new NodeVariable<>("Text", String.class);
 

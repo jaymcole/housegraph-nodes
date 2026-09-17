@@ -40,7 +40,8 @@ public class DiscordBotRefNode extends BaseNode implements NodeContentProvider {
     private static final String DEFAULT_NAME = "discord";
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Bot Name", String.class, true), DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Bot Name", String.class, true)
+                    .describedAs("Must match a Discord Bot node's Bot Name exactly to resolve."), DEFAULT_NAME);
     /**
      * Transient, like the Discord Bot node's own {@code Bot} output: a live connection handle is
      * not something a save file can carry. It is re-resolved rather than restored.

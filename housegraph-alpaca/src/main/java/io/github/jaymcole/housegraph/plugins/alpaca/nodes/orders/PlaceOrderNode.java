@@ -106,33 +106,69 @@ public class PlaceOrderNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<String> symbolInput =
             new NodeVariable<>("Symbol", String.class, true).required();
     private final NodeVariable<String> sideInput = withDefault(
-            new NodeVariable<>("Side", String.class, true).required(), OrderSide.BUY.wireValue());
-    private final NodeVariable<Double> quantityInput = new NodeVariable<>("Quantity", Double.class, true);
-    private final NodeVariable<Double> amountInput = new NodeVariable<>("Amount ($)", Double.class, true);
+            new NodeVariable<>("Side", String.class, true).required(), OrderSide.BUY.wireValue())
+                    .describedAs("Valid values are buy or sell.");
+    private final NodeVariable<Double> quantityInput = new NodeVariable<>("Quantity", Double.class, true)
+            .describedAs("Shares to trade, which may be fractional. Mutually exclusive with Amount "
+                    + "($) - filling in both fails the node rather than guessing which was meant.");
+    private final NodeVariable<Double> amountInput = new NodeVariable<>("Amount ($)", Double.class, true)
+            .describedAs("Dollars to spend, worked out to a share count by Alpaca at execution. "
+                    + "Mutually exclusive with Quantity, and only accepted on a market order good for "
+                    + "the day.");
     private final NodeVariable<String> orderTypeInput = withDefault(
-            new NodeVariable<>("Order Type", String.class, true), OrderType.MARKET.label());
+            new NodeVariable<>("Order Type", String.class, true), OrderType.MARKET.label())
+                    .describedAs("One of market, limit, stop, stop_limit or trailing_stop. market "
+                            + "needs nothing else; limit needs Limit Price; stop needs Stop Price; "
+                            + "stop_limit needs both; trailing_stop needs Trail Price or Trail "
+                            + "Percent.");
     private final NodeVariable<Double> limitPriceInput =
-            new NodeVariable<>("Limit Price", Double.class, true);
+            new NodeVariable<>("Limit Price", Double.class, true)
+                    .describedAs("Used by limit and stop_limit orders: the order fills at this price "
+                            + "or better, or not at all.");
     private final NodeVariable<Double> stopPriceInput =
-            new NodeVariable<>("Stop Price", Double.class, true);
+            new NodeVariable<>("Stop Price", Double.class, true)
+                    .describedAs("Used by stop and stop_limit orders: the trigger price at which the "
+                            + "order activates.");
     private final NodeVariable<Double> trailPriceInput =
-            new NodeVariable<>("Trail Price", Double.class, true);
+            new NodeVariable<>("Trail Price", Double.class, true)
+                    .describedAs("trailing_stop orders only: the dollar distance the stop follows "
+                            + "behind the best price seen. An alternative to Trail Percent - set one "
+                            + "or the other.");
     private final NodeVariable<Double> trailPercentInput =
-            new NodeVariable<>("Trail Percent", Double.class, true);
+            new NodeVariable<>("Trail Percent", Double.class, true)
+                    .describedAs("trailing_stop orders only: the trail as a percent from 0 to 100, "
+                            + "not a fraction. An alternative to Trail Price - set one or the other.");
     private final NodeVariable<String> timeInForceInput = withDefault(
-            new NodeVariable<>("Time In Force", String.class, true), TimeInForce.DAY.wireValue());
+            new NodeVariable<>("Time In Force", String.class, true), TimeInForce.DAY.wireValue())
+                    .describedAs("How long the order stays working: day (cancelled at the close, the "
+                            + "default), gtc (good till cancelled), opg (at the open), cls (at the "
+                            + "close), ioc (immediate or cancel) or fok (fill or kill).");
     private final NodeVariable<Boolean> extendedHoursInput =
-            withDefault(new NodeVariable<>("Extended Hours", Boolean.class, true), Boolean.FALSE);
+            withDefault(new NodeVariable<>("Extended Hours", Boolean.class, true), Boolean.FALSE)
+                    .describedAs("Only takes effect on a limit order good for the day - silently "
+                            + "ignored on any other Order Type or Time In Force.");
     private final NodeVariable<Double> maxOrderValueInput =
-            new NodeVariable<>("Max Order Value ($)", Double.class, true);
+            new NodeVariable<>("Max Order Value ($)", Double.class, true)
+                    .describedAs("A ceiling on this order's estimated value. Blank means no ceiling. "
+                            + "An order estimated to be worth more than this fails the node rather "
+                            + "than being let through.");
     private final NodeVariable<Boolean> dryRunInput =
-            withDefault(new NodeVariable<>("Dry Run", Boolean.class, true), Boolean.TRUE);
+            withDefault(new NodeVariable<>("Dry Run", Boolean.class, true), Boolean.TRUE)
+                    .describedAs("Defaults to true: nothing is sent to Alpaca until this is explicitly "
+                            + "turned off, on either a paper or a live account. While true, the node "
+                            + "works out and reports what it would have done and fires Not Placed "
+                            + "instead of trading.");
 
-    private final NodeVariable<String> orderIdOutput = new NodeVariable<>("Order ID", String.class);
-    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class);
+    private final NodeVariable<String> orderIdOutput = new NodeVariable<>("Order ID", String.class)
+            .describedAs("Null during a dry run, or before an order has actually been placed.");
+    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class)
+            .describedAs("The order's raw status once placed. During a dry run this reads the literal "
+                    + "string \"dry run\" instead.");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
     private final NodeVariable<Double> estimatedValueOutput =
-            new NodeVariable<>("Estimated Value", Double.class);
+            new NodeVariable<>("Estimated Value", Double.class)
+                    .describedAs("The dollar basis this order was checked against Max Order Value ($) "
+                            + "with. Populated even on a dry run.");
     private final NodeVariable<Boolean> wasPlacedOutput = new NodeVariable<>("Was Placed", Boolean.class);
     private final NodeVariable<Boolean> isPaperOutput = new NodeVariable<>("Is Paper", Boolean.class);
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);

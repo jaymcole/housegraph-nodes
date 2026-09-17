@@ -53,14 +53,23 @@ public class GetPositionsNode extends BaseNode implements NodeContentProvider {
     private static final Class<List<?>> LIST = (Class<List<?>>) (Class<?>) List.class;
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
     private final NodeVariable<Boolean> includePricesInput =
-            withDefault(new NodeVariable<>("Include Prices", Boolean.class, true), Boolean.TRUE);
+            withDefault(new NodeVariable<>("Include Prices", Boolean.class, true), Boolean.TRUE)
+                    .describedAs("Costs one extra call for the whole portfolio. On, it fills in price, "
+                            + "market_value and unrealised_gain in Positions; off, those are left out.");
 
-    private final NodeVariable<List<?>> positionsOutput = new NodeVariable<>("Positions", LIST);
-    private final NodeVariable<List<?>> symbolsOutput = new NodeVariable<>("Symbols", LIST);
+    private final NodeVariable<List<?>> positionsOutput = new NodeVariable<>("Positions", LIST)
+            .describedAs("One map per holding, keyed symbol, quantity, average_buy_price, price, "
+                    + "market_value, cost_basis and unrealised_gain.");
+    private final NodeVariable<List<?>> symbolsOutput = new NodeVariable<>("Symbols", LIST)
+            .describedAs("Positions reduced to plain ticker strings — the list to feed a For Each loop.");
     private final NodeVariable<Integer> countOutput = new NodeVariable<>("Count", Integer.class);
-    private final NodeVariable<Double> marketValueOutput = new NodeVariable<>("Market Value", Double.class);
+    private final NodeVariable<Double> marketValueOutput = new NodeVariable<>("Market Value", Double.class)
+            .describedAs("Null, not zero, when Include Prices was off or nothing could be priced — a "
+                    + "portfolio worth nothing and a portfolio nobody priced must not look the same.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

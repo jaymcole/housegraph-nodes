@@ -98,11 +98,14 @@ public class DiscordSlashCommandNode extends BaseNode implements NodeContentProv
 
     private static final String LEGACY_OPTIONS_KEY = "options";
 
-    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
-    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class);
+    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required()
+            .describedAs("Wire a Discord Bot (or Discord Bot Ref) node's Bot output.");
+    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class)
+            .describedAs("The numeric channel ID, not a channel name.");
     private final NodeVariable<String> senderId = new NodeVariable<>("Sender ID", String.class);
     private final NodeVariable<String> senderName = new NodeVariable<>("Sender Name", String.class);
-    private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue();
+    private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue()
+            .describedAs("Wire this into a Discord Reply node to answer this specific invocation.");
     private final Map<String, NodeVariable<String>> optionOutputs = new LinkedHashMap<>();
     private final List<CommandOption> options = new ArrayList<>();
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

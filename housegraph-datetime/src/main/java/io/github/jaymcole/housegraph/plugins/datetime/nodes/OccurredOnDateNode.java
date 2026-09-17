@@ -33,8 +33,11 @@ import java.time.ZoneId;
 @Node.Type("datetime.OccurredOnDateNode")
 public class OccurredOnDateNode extends BaseNode {
 
-    private final NodeVariable<Long> millis = new NodeVariable<>("Milliseconds", Long.class, true).required();
-    private final NodeVariable<Long> dateMillis = new NodeVariable<>("Date", Long.class, true).required();
+    private final NodeVariable<Long> millis = new NodeVariable<>("Milliseconds", Long.class, true).required()
+            .describedAs("Epoch milliseconds — the moment being checked. Unwired reads as epoch 0.");
+    private final NodeVariable<Long> dateMillis = new NodeVariable<>("Date", Long.class, true).required()
+            .describedAs("Epoch milliseconds — the day being checked against, the same units as "
+                    + "Milliseconds despite the different name.");
 
     private final NodeVariable<Boolean> occurred = new NodeVariable<>("Occurred", Boolean.class);
 

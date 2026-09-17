@@ -87,35 +87,69 @@ public class PlaceOrderNode extends BaseNode implements NodeContentProvider {
     private static final Logger log = Log.get(PlaceOrderNode.class);
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
     private final NodeVariable<String> symbolInput =
             new NodeVariable<>("Symbol", String.class, true).required();
     private final NodeVariable<String> sideInput = withDefault(
-            new NodeVariable<>("Side", String.class, true).required(), OrderSide.BUY.wireValue());
-    private final NodeVariable<Double> quantityInput = new NodeVariable<>("Quantity", Double.class, true);
-    private final NodeVariable<Double> amountInput = new NodeVariable<>("Amount ($)", Double.class, true);
+            new NodeVariable<>("Side", String.class, true).required(), OrderSide.BUY.wireValue())
+                    .describedAs("\"buy\" or \"sell\". Defaults to buy.");
+    private final NodeVariable<Double> quantityInput = new NodeVariable<>("Quantity", Double.class, true)
+            .describedAs("Shares to order, which may be fractional. Mutually exclusive with Amount ($) — "
+                    + "fill in one or the other, not both.");
+    private final NodeVariable<Double> amountInput = new NodeVariable<>("Amount ($)", Double.class, true)
+            .describedAs("Dollars to spend, converted to a share count at the current price and rounded "
+                    + "down so this never spends more than asked. Market orders only. Mutually exclusive "
+                    + "with Quantity.");
     private final NodeVariable<String> orderTypeInput = withDefault(
-            new NodeVariable<>("Order Type", String.class, true), OrderType.MARKET.label());
+            new NodeVariable<>("Order Type", String.class, true), OrderType.MARKET.label())
+                    .describedAs("market, limit, stop loss or stop limit. market fills now at the going "
+                            + "price; limit fills at Limit Price or better; stop loss becomes a market "
+                            + "order once Stop Price is reached; stop limit becomes a limit order at "
+                            + "Limit Price once Stop Price is reached.");
     private final NodeVariable<Double> limitPriceInput =
-            new NodeVariable<>("Limit Price", Double.class, true);
-    private final NodeVariable<Double> stopPriceInput = new NodeVariable<>("Stop Price", Double.class, true);
+            new NodeVariable<>("Limit Price", Double.class, true)
+                    .describedAs("Dollars per share. Required for limit and stop-limit orders — the "
+                            + "order fills at this price or better, or not at all.");
+    private final NodeVariable<Double> stopPriceInput = new NodeVariable<>("Stop Price", Double.class, true)
+            .describedAs("Dollars per share at which a stop-loss or stop-limit order triggers.");
     private final NodeVariable<String> timeInForceInput = withDefault(
-            new NodeVariable<>("Time In Force", String.class, true), TimeInForce.GTC.wireValue());
+            new NodeVariable<>("Time In Force", String.class, true), TimeInForce.GTC.wireValue())
+                    .describedAs("How long the order stays working: gtc (good till cancelled), gfd "
+                            + "(cancelled at the close), ioc (immediate or cancel) or opg (at the "
+                            + "opening auction).");
     private final NodeVariable<Boolean> extendedHoursInput =
-            withDefault(new NodeVariable<>("Extended Hours", Boolean.class, true), Boolean.FALSE);
+            withDefault(new NodeVariable<>("Extended Hours", Boolean.class, true), Boolean.FALSE)
+                    .describedAs("Off by default. On, makes the order eligible to fill during extended "
+                            + "trading hours.");
     private final NodeVariable<Double> maxOrderValueInput =
-            new NodeVariable<>("Max Order Value ($)", Double.class, true);
+            new NodeVariable<>("Max Order Value ($)", Double.class, true)
+                    .describedAs("A ceiling in dollars. Blank means no ceiling. An order estimated to be "
+                            + "worth more than this FAILS the node rather than being silently skipped.");
     private final NodeVariable<Boolean> dryRunInput =
-            withDefault(new NodeVariable<>("Dry Run", Boolean.class, true), Boolean.TRUE);
+            withDefault(new NodeVariable<>("Dry Run", Boolean.class, true), Boolean.TRUE)
+                    .describedAs("On by default. While on, nothing is sent to Robinhood — the order is "
+                            + "worked out and reported, but not placed. Turn it off deliberately once "
+                            + "the graph around it is right.");
 
-    private final NodeVariable<String> orderIdOutput = new NodeVariable<>("Order ID", String.class);
-    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class);
+    private final NodeVariable<String> orderIdOutput = new NodeVariable<>("Order ID", String.class)
+            .describedAs("Null during a dry run, and null before the order has been placed.");
+    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class)
+            .describedAs("Robinhood's order state after placement — or literally \"dry run\" when Dry "
+                    + "Run is on, rather than a real Robinhood state.");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
     private final NodeVariable<Double> orderedQuantityOutput =
-            new NodeVariable<>("Ordered Quantity", Double.class);
+            new NodeVariable<>("Ordered Quantity", Double.class)
+                    .describedAs("The resolved share count actually used — after converting Amount ($) "
+                            + "to shares, if that's what was given.");
     private final NodeVariable<Double> estimatedValueOutput =
-            new NodeVariable<>("Estimated Value", Double.class);
-    private final NodeVariable<Boolean> wasPlacedOutput = new NodeVariable<>("Was Placed", Boolean.class);
+            new NodeVariable<>("Estimated Value", Double.class)
+                    .describedAs("Computed before submission, to check against Max Order Value ($). May "
+                            + "differ from what the order actually fills for.");
+    private final NodeVariable<Boolean> wasPlacedOutput = new NodeVariable<>("Was Placed", Boolean.class)
+            .describedAs("False for both a dry run and a failure — true only once the order was "
+                    + "actually submitted to Robinhood.");
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

@@ -33,7 +33,8 @@ import java.util.List;
 public class GetItemNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class, true).required();
+    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class, true).required()
+            .describedAs("Zero-based. Negative counts back from the end, so -1 is the last entry.");
 
     private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class);
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);

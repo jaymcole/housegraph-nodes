@@ -20,7 +20,8 @@ import io.github.jaymcole.housegraph.graph.ProcessContext;
 @Node.Type("datetime.CurrentDateTimeNode")
 public class CurrentDateTimeNode extends BaseNode {
 
-    private final NodeVariable<Long> milliseconds = new NodeVariable<>("Milliseconds", Long.class);
+    private final NodeVariable<Long> milliseconds = new NodeVariable<>("Milliseconds", Long.class)
+            .describedAs("Milliseconds since the Unix epoch, UTC.");
 
     @Override
     public void process(ProcessContext ctx) {

@@ -40,7 +40,9 @@ import java.util.Map;
 @Node.Type("database.UpdateRowsNode")
 public class UpdateRowsNode extends ConditionsNode {
 
-    private final NodeVariable<Map<?, ?>> setInput = new NodeVariable<>("Set", Rows.ROW_TYPE).required();
+    private final NodeVariable<Map<?, ?>> setInput = new NodeVariable<>("Set", Rows.ROW_TYPE).required()
+            .describedAs("A column-to-new-value map. A null value changes nothing — set the column to "
+                    + "empty text to actually clear it.");
 
     private final NodeVariable<Integer> updatedCount = new NodeVariable<>("Updated", Integer.class);
 
@@ -70,6 +72,8 @@ public class UpdateRowsNode extends ConditionsNode {
     @Override
     public void configureInputs() {
         addInput(databaseInput);
+        tableInput.describedAs("A table that doesn't exist yet updates nothing and is not an error; "
+                + "unmatched columns are created automatically.");
         addInput(tableInput);
         addInput(setInput);
         addConditionInputs();

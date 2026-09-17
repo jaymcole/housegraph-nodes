@@ -33,7 +33,9 @@ import java.util.List;
 public class AppendItemNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE);
-    private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class).required();
+    private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class).required()
+            .describedAs("The value to add. Object-typed on purpose so any output feeds it; a null value "
+                    + "appends nothing.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
 

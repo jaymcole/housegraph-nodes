@@ -47,8 +47,12 @@ public class ParseNumberNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
 
-    private final NodeVariable<Double> number = new NodeVariable<>("Number", Double.class);
-    private final NodeVariable<Boolean> valid = new NodeVariable<>("Valid", Boolean.class);
+    private final NodeVariable<Double> number = new NodeVariable<>("Number", Double.class)
+            .describedAs("0 when the text did not parse — never null or an error. Always a Double, even "
+                    + "for a whole number.");
+    private final NodeVariable<Boolean> valid = new NodeVariable<>("Valid", Boolean.class)
+            .describedAs("False means the text was not a plain number — that is data, not a failure. "
+                    + "Parsing is strict: no NaN, Infinity, hexadecimal or thousands separators.");
 
     @Override
     public void process(ProcessContext ctx) {

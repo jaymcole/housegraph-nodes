@@ -35,7 +35,8 @@ import java.util.List;
 public class FormatEachNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> template = new NodeVariable<>("Template", String.class, true).required();
+    private final NodeVariable<String> template = new NodeVariable<>("Template", String.class, true).required()
+            .describedAs("The text each entry is rewritten through, using {item}, {index} and {number}.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
 

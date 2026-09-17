@@ -112,7 +112,9 @@ public class RobinhoodAccountNode extends BaseNode implements NodeContentProvide
     private String registeredName;
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Account Name", String.class, true), DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Account Name", String.class, true), DEFAULT_NAME)
+                    .describedAs("The name other Robinhood nodes look this session up by, via a "
+                            + "Robinhood Account Ref node.");
     /**
      * Secret, although a username is not much of one, because of where the value would otherwise
      * end up. A save file records a manually-editable input's <em>current</em> value, and it cannot
@@ -122,17 +124,24 @@ public class RobinhoodAccountNode extends BaseNode implements NodeContentProvide
      * file, which is the one thing fetching it from the store was meant to avoid.
      */
     private final NodeVariable<String> usernameInput =
-            new NodeVariable<>("Username", String.class, true).required().markSecret();
+            new NodeVariable<>("Username", String.class, true).required().markSecret()
+                    .describedAs("Wire this from a Secret Loader node rather than typing it in.");
     private final NodeVariable<String> passwordInput =
-            new NodeVariable<>("Password", String.class, true).required().markSecret();
+            new NodeVariable<>("Password", String.class, true).required().markSecret()
+                    .describedAs("Wire this from a Secret Loader node rather than typing it in.");
     private final NodeVariable<String> mfaSecretInput =
-            new NodeVariable<>("MFA Secret", String.class, true).markSecret();
+            new NodeVariable<>("MFA Secret", String.class, true).markSecret()
+                    .describedAs("The base32 authenticator seed, not a 6-digit code. Blank falls back "
+                            + "to an approval tap in the Robinhood app.");
     private final NodeVariable<Integer> approvalTimeoutInput =
             withDefault(new NodeVariable<>("Approval Timeout (s)", Integer.class, true),
-                    DEFAULT_APPROVAL_TIMEOUT_SECONDS);
+                    DEFAULT_APPROVAL_TIMEOUT_SECONDS)
+                    .describedAs("Seconds to wait for the phone approval tap when MFA Secret is empty.");
 
     private final NodeVariable<RobinhoodSession> accountOutput =
-            new NodeVariable<>("Account", RobinhoodSession.class).transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class).transientValue()
+                    .describedAs("The live session handle — wire this into every other Robinhood "
+                            + "node's Account input.");
     private final NodeVariable<String> accountNumberOutput =
             new NodeVariable<>("Account Number", String.class);
     private final NodeVariable<Boolean> connectedOutput =

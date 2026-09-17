@@ -43,8 +43,11 @@ public class MapEntriesNode extends BaseNode {
 
     private final NodeVariable<Map<?, ?>> map = new NodeVariable<>("Map", Maps.TYPE).required();
 
-    private final NodeVariable<List<?>> keys = new NodeVariable<>("Keys", Lists.TYPE);
-    private final NodeVariable<List<?>> values = new NodeVariable<>("Values", Lists.TYPE);
+    private final NodeVariable<List<?>> keys = new NodeVariable<>("Keys", Lists.TYPE)
+            .describedAs("Comes out as text even when stored as another type; lines up index-for-index "
+                    + "with Values.");
+    private final NodeVariable<List<?>> values = new NodeVariable<>("Values", Lists.TYPE)
+            .describedAs("The Keys[i]/Values[i] pairing is the whole point of this port.");
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
     private final NodeVariable<Boolean> empty = new NodeVariable<>("Is Empty", Boolean.class);
 

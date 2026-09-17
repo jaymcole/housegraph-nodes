@@ -51,12 +51,19 @@ import java.util.Map;
 public class InsertRowNode extends BaseNode {
 
     private final NodeVariable<Database> databaseInput =
-            new NodeVariable<>("Database", Database.class).transientValue().required();
-    private final NodeVariable<String> tableInput = new NodeVariable<>("Table", String.class, true).required();
-    private final NodeVariable<Map<?, ?>> rowInput = new NodeVariable<>("Row", Rows.ROW_TYPE).required();
+            new NodeVariable<>("Database", Database.class).transientValue().required()
+                    .describedAs("Can only be wired, never typed — the transient live database handle from "
+                            + "a Database node.");
+    private final NodeVariable<String> tableInput = new NodeVariable<>("Table", String.class, true).required()
+            .describedAs("The table, and any new column it needs, is created automatically on first insert.");
+    private final NodeVariable<Map<?, ?>> rowInput = new NodeVariable<>("Row", Rows.ROW_TYPE).required()
+            .describedAs("A map whose keys become columns. A blank key or a null value is silently skipped.");
 
-    private final NodeVariable<Long> id = new NodeVariable<>("Id", Long.class);
-    private final NodeVariable<Integer> columnsAdded = new NodeVariable<>("Columns Added", Integer.class);
+    private final NodeVariable<Long> id = new NodeVariable<>("Id", Long.class)
+            .describedAs("The SQLite rowid primary key, never reused. Holds the last insert's id when only "
+                    + "pulled, not triggered.");
+    private final NodeVariable<Integer> columnsAdded = new NodeVariable<>("Columns Added", Integer.class)
+            .describedAs("0 is the normal, expected value — a climbing count usually means a typo'd map key.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

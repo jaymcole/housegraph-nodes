@@ -34,8 +34,10 @@ import java.util.Set;
 @Node.Type("collections.SetAddNode")
 public class SetAddNode extends BaseNode {
 
-    private final NodeVariable<Set<?>> set = new NodeVariable<>("Set", Sets.TYPE);
-    private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class).required();
+    private final NodeVariable<Set<?>> set = new NodeVariable<>("Set", Sets.TYPE)
+            .describedAs("Not required — an unwired Set reads as empty, which starts a new set.");
+    private final NodeVariable<Object> item = new NodeVariable<>("Item", Object.class).required()
+            .describedAs("Accepts any type. A null item adds nothing.");
 
     private final NodeVariable<Set<?>> result = new NodeVariable<>("Set", Sets.TYPE);
     private final NodeVariable<Boolean> added = new NodeVariable<>("Added", Boolean.class);
