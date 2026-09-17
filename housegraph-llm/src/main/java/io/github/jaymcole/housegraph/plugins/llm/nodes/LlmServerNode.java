@@ -332,8 +332,7 @@ public class LlmServerNode extends BaseNode implements NodeContentProvider, Auto
         if (error != null) {
             statusLabel.setText("Failed — " + error.getMessage());
         } else if (server.isRunning()) {
-            statusLabel.setText((server.isAdopted() ? "Adopted " : "Running at ") + server.address()
-                    + " — " + server.detail());
+            statusLabel.setText((server.isAdopted() ? "Adopted " : "Running at ") + server.address());
         } else {
             statusLabel.setText("Stopped");
         }
