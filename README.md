@@ -20,7 +20,7 @@ they just share a build and a release.
 | `housegraph-store` | Stored Value | nothing |
 | `housegraph-llm` | Local LLM Server, Pull Model, LLM Server Status, Local LLM, Clear Conversation | nothing |
 | `housegraph-database` | Database, Insert Row, Find Rows, Update Rows, Delete Rows, SQL Query, SQL Statement | sqlite-jdbc |
-| `housegraph-datetime` | Milliseconds To Date Time | nothing |
+| `housegraph-datetime` | Milliseconds To Date Time, Current Date Time, Occurred On Date | nothing |
 | `housegraph-app` | Graph Images | nothing |
 | `housegraph-robinhood` | Robinhood Account, Robinhood Account Ref, Get Quote, Account Summary, Get Positions, Place Order, Order Status, Cancel Order, Get Recent Orders | nothing |
 | `housegraph-alpaca` | Alpaca Account, Alpaca Account Ref<br>**market:** Get Quote, Get Bars, Market Clock<br>**portfolio:** Account Summary, Get Positions, Close Position<br>**orders:** Place Order, Order Status, Cancel Order, Get Recent Orders | nothing |

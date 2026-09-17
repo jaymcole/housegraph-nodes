@@ -7,10 +7,11 @@ import io.github.jaymcole.housegraph.graph.ProcessContext;
 import java.util.List;
 
 /**
- * Reading and writing a node's ports by name, for the node tests in this package.
+ * Reading and writing a node's ports by name, for this package's pure-data-node tests.
  * <p>
- * Every node here is a pure data node, so a test is just "set the inputs, call {@code process()},
- * read the outputs" — no {@code NodeGraph}, no flow, no JavaFX.
+ * Every node this is used against is a pure data node, so a test is just "set the inputs, call
+ * {@code process()}, read the outputs" — no {@code NodeGraph}, no flow, no JavaFX.
+ * {@link OccurredOnDateNode} has flow ports and exercises them directly instead.
  * <p>
  * Lookup is by the port's display name and fails loudly when it finds nothing, so renaming a port
  * without updating its test is a clear error rather than a silent pass against a stale name.
