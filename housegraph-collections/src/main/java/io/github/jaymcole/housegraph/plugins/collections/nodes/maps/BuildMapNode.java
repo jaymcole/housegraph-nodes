@@ -52,7 +52,9 @@ public class BuildMapNode extends BaseNode {
     private final List<NodeVariable<Object>> values = new ArrayList<>();
 
     private final NodeVariable<Map<?, ?>> result = new NodeVariable<>("Map", Maps.TYPE);
-    private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
+    private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class)
+            .describedAs("Entries that actually landed, not pairs wired — repeats collapse and "
+                    + "half-filled pairs are excluded.");
 
     /** The current number of key/value pairs; persisted, so a loaded node has its ports back. */
     private int pairs = MINIMUM_PAIRS;
@@ -78,8 +80,11 @@ public class BuildMapNode extends BaseNode {
         keys.clear();
         values.clear();
         for (int i = 1; i <= pairs; i++) {
-            NodeVariable<String> key = new NodeVariable<>("Key " + i, String.class, true);
-            NodeVariable<Object> value = new NodeVariable<>("Value " + i, Object.class);
+            NodeVariable<String> key = new NodeVariable<>("Key " + i, String.class, true)
+                    .describedAs("A blank or unwired key contributes nothing; a repeated key means the "
+                            + "later pair wins.");
+            NodeVariable<Object> value = new NodeVariable<>("Value " + i, Object.class)
+                    .describedAs("Accepts any wired type. A pair with no value wired contributes nothing.");
             keys.add(key);
             values.add(value);
             addInput(key);

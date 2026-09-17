@@ -41,8 +41,12 @@ public class ParseBooleanNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
 
-    private final NodeVariable<Boolean> value = new NodeVariable<>("Value", Boolean.class);
-    private final NodeVariable<Boolean> valid = new NodeVariable<>("Valid", Boolean.class);
+    private final NodeVariable<Boolean> value = new NodeVariable<>("Value", Boolean.class)
+            .describedAs("false and meaningless when Valid is false. Recognized words include true, "
+                    + "yes, y, on, 1 and their opposites.");
+    private final NodeVariable<Boolean> valid = new NodeVariable<>("Valid", Boolean.class)
+            .describedAs("False means the text was not one of the recognized words — that is unrecognized "
+                    + "input, not a failure of the node.");
 
     @Override
     public void process(ProcessContext ctx) {

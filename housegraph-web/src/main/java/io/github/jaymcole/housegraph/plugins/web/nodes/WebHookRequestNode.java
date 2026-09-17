@@ -24,7 +24,8 @@ public class WebHookRequestNode extends AbstractWebHookNode {
 
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
 
-    private final NodeVariable<WebHookReply> reply = new NodeVariable<>("Reply", WebHookReply.class).transientValue();
+    private final NodeVariable<WebHookReply> reply = new NodeVariable<>("Reply", WebHookReply.class).transientValue()
+            .describedAs("Wire this into a Web Hook Reply node before Reply Timeout (s) elapses.");
 
     private int timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
     private TextField timeoutField;

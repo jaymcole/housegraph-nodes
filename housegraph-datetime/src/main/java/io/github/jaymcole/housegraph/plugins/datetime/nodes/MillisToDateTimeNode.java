@@ -27,14 +27,21 @@ import java.time.ZonedDateTime;
 @Node.Type("datetime.MillisToDateTimeNode")
 public class MillisToDateTimeNode extends BaseNode {
 
-    private final NodeVariable<Long> millis = new NodeVariable<>("Milliseconds", Long.class, true).required();
+    private final NodeVariable<Long> millis = new NodeVariable<>("Milliseconds", Long.class, true).required()
+            .describedAs("Epoch milliseconds, UTC. Unwired reads as epoch 0, not a failure.");
 
-    private final NodeVariable<Integer> year = new NodeVariable<>("Year", Integer.class);
-    private final NodeVariable<Integer> month = new NodeVariable<>("Month", Integer.class);
-    private final NodeVariable<Integer> day = new NodeVariable<>("Day", Integer.class);
-    private final NodeVariable<Integer> hour = new NodeVariable<>("Hour", Integer.class);
-    private final NodeVariable<Integer> minute = new NodeVariable<>("Minute", Integer.class);
-    private final NodeVariable<Integer> second = new NodeVariable<>("Second", Integer.class);
+    private final NodeVariable<Integer> year = new NodeVariable<>("Year", Integer.class)
+            .describedAs("Read in the JVM's system-default timezone, not UTC.");
+    private final NodeVariable<Integer> month = new NodeVariable<>("Month", Integer.class)
+            .describedAs("1-12, not 0-based. Same system-default-timezone caveat as Year.");
+    private final NodeVariable<Integer> day = new NodeVariable<>("Day", Integer.class)
+            .describedAs("Same system-default-timezone caveat as Year.");
+    private final NodeVariable<Integer> hour = new NodeVariable<>("Hour", Integer.class)
+            .describedAs("Same system-default-timezone caveat as Year.");
+    private final NodeVariable<Integer> minute = new NodeVariable<>("Minute", Integer.class)
+            .describedAs("Same system-default-timezone caveat as Year.");
+    private final NodeVariable<Integer> second = new NodeVariable<>("Second", Integer.class)
+            .describedAs("Same system-default-timezone caveat as Year.");
 
     @Override
     public void process(ProcessContext ctx) {

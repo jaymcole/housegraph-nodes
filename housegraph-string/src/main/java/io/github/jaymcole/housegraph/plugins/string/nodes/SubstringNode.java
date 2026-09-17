@@ -31,8 +31,12 @@ import io.github.jaymcole.housegraph.plugins.string.Texts;
 public class SubstringNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<Integer> start = new NodeVariable<>("Start", Integer.class, true);
-    private final NodeVariable<Integer> end = new NodeVariable<>("End", Integer.class, true);
+    private final NodeVariable<Integer> start = new NodeVariable<>("Start", Integer.class, true)
+            .describedAs("Zero-based, inclusive. Blank means the beginning of the text; negative counts "
+                    + "back from the end.");
+    private final NodeVariable<Integer> end = new NodeVariable<>("End", Integer.class, true)
+            .describedAs("Zero-based, exclusive. Blank means the end of the text; negative counts back "
+                    + "from the end.");
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);
 

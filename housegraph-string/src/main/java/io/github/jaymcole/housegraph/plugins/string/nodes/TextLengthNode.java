@@ -30,8 +30,12 @@ public class TextLengthNode extends BaseNode {
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
 
     private final NodeVariable<Integer> length = new NodeVariable<>("Length", Integer.class);
-    private final NodeVariable<Boolean> isEmpty = new NodeVariable<>("Is Empty", Boolean.class);
-    private final NodeVariable<Boolean> isBlank = new NodeVariable<>("Is Blank", Boolean.class);
+    private final NodeVariable<Boolean> isEmpty = new NodeVariable<>("Is Empty", Boolean.class)
+            .describedAs("True only for no characters at all — whitespace-only text is not \"empty\". "
+                    + "See Is Blank for that case.");
+    private final NodeVariable<Boolean> isBlank = new NodeVariable<>("Is Blank", Boolean.class)
+            .describedAs("True for no characters at all, and also for text that is entirely "
+                    + "whitespace — unlike Is Empty.");
 
     @Override
     public void process(ProcessContext ctx) {

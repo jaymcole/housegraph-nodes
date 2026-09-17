@@ -30,9 +30,13 @@ import java.util.Map;
 @Node.Type("collections.ClearMapNode")
 public class ClearMapNode extends BaseNode {
 
-    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required();
+    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required()
+            .describedAs("A shared key, not a wire — the same named-collection concept as Put In Map's "
+                    + "Name.");
 
-    private final NodeVariable<Map<?, ?>> collected = new NodeVariable<>("Map", Maps.TYPE);
+    private final NodeVariable<Map<?, ?>> collected = new NodeVariable<>("Map", Maps.TYPE)
+            .describedAs("Pulling without a flow arrival republishes current, possibly non-empty, "
+                    + "contents.");
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

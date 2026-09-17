@@ -35,10 +35,14 @@ public class CompareTextNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
     private final NodeVariable<String> search = new NodeVariable<>("Search", String.class, true).required();
-    private final NodeVariable<String> mode = new NodeVariable<>("Comparison", String.class, true);
+    private final NodeVariable<String> mode = new NodeVariable<>("Comparison", String.class, true)
+            .describedAs("Which test to run: contains, starts with, ends with or equals, plus the "
+                    + "negation of each. Case-insensitive.");
 
     private final NodeVariable<Boolean> result = new NodeVariable<>("Result", Boolean.class);
-    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class);
+    private final NodeVariable<Integer> index = new NodeVariable<>("Index", Integer.class)
+            .describedAs("Where Search first appears in Text, or -1 when it does not. Set the same way "
+                    + "regardless of which comparison mode was used.");
 
     public CompareTextNode() {
         mode.setValue(CompareMode.CONTAINS.label());

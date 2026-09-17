@@ -25,7 +25,9 @@ import io.github.jaymcole.housegraph.plugins.string.CaseMode;
 public class ChangeCaseNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> mode = new NodeVariable<>("Case", String.class, true);
+    private final NodeVariable<String> mode = new NodeVariable<>("Case", String.class, true)
+            .describedAs("The conversion to apply: upper, lower, title or sentence. Blank means upper; "
+                    + "anything else fails the node.");
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);
 

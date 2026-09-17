@@ -63,17 +63,31 @@ public class OrderStatusNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<String> orderIdInput =
             new NodeVariable<>("Order ID", String.class, true).required();
 
-    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class);
+    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class)
+            .describedAs("The order's raw status. Alpaca gives no reject-reason field, so a rejected "
+                    + "order reads simply \"rejected\"; a state this library doesn't recognize reads "
+                    + "as still running rather than as finished.");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
-    private final NodeVariable<String> sideOutput = new NodeVariable<>("Side", String.class);
-    private final NodeVariable<Double> quantityOutput = new NodeVariable<>("Quantity", Double.class);
+    private final NodeVariable<String> sideOutput = new NodeVariable<>("Side", String.class)
+            .describedAs("The wire value, literally \"buy\" or \"sell\".");
+    private final NodeVariable<Double> quantityOutput = new NodeVariable<>("Quantity", Double.class)
+            .describedAs("Shares ordered, which may be fractional.");
     private final NodeVariable<Double> filledQuantityOutput =
-            new NodeVariable<>("Filled Quantity", Double.class);
+            new NodeVariable<>("Filled Quantity", Double.class)
+                    .describedAs("Shares filled so far, which may be less than Quantity while the "
+                            + "order is still working.");
     private final NodeVariable<Double> averagePriceOutput =
-            new NodeVariable<>("Average Price", Double.class);
-    private final NodeVariable<Double> filledValueOutput = new NodeVariable<>("Filled Value", Double.class);
-    private final NodeVariable<Boolean> finishedOutput = new NodeVariable<>("Finished", Boolean.class);
-    private final NodeVariable<String> filledAtOutput = new NodeVariable<>("Filled At", String.class);
+            new NodeVariable<>("Average Price", Double.class)
+                    .describedAs("Dollars per share, averaged across every fill. Null while the order "
+                            + "is unfilled.");
+    private final NodeVariable<Double> filledValueOutput = new NodeVariable<>("Filled Value", Double.class)
+            .describedAs("Total dollars filled - Average Price times Filled Quantity - distinct from "
+                    + "either one on its own.");
+    private final NodeVariable<Boolean> finishedOutput = new NodeVariable<>("Finished", Boolean.class)
+            .describedAs("True once the order is filled, cancelled or rejected. Not the same as "
+                    + "\"succeeded\" - check State or the Rejected flow-out for that.");
+    private final NodeVariable<String> filledAtOutput = new NodeVariable<>("Filled At", String.class)
+            .describedAs("ISO-8601 text for when the order filled. Null while it hasn't.");
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

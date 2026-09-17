@@ -46,9 +46,11 @@ import java.util.Map;
 @Node.Type("collections.GetNamedMapNode")
 public class GetNamedMapNode extends BaseNode {
 
-    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required();
+    private final NodeVariable<String> name = new NodeVariable<>("Name", String.class, true).required()
+            .describedAs("Names a shared, memory-only collection, paired with Put In Map and Clear Map.");
 
-    private final NodeVariable<Map<?, ?>> collected = new NodeVariable<>("Map", Maps.TYPE);
+    private final NodeVariable<Map<?, ?>> collected = new NodeVariable<>("Map", Maps.TYPE)
+            .describedAs("An unmodifiable snapshot taken at pull time, not re-read later in the same run.");
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
 
     @Override

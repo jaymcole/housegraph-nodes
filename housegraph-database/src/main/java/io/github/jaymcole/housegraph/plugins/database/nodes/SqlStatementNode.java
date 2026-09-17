@@ -42,11 +42,19 @@ import java.util.List;
 public class SqlStatementNode extends BaseNode {
 
     private final NodeVariable<Database> databaseInput =
-            new NodeVariable<>("Database", Database.class).transientValue().required();
-    private final NodeVariable<String> sqlInput = new NodeVariable<>("SQL", String.class, true).required();
-    private final NodeVariable<List<?>> paramsInput = new NodeVariable<>("Params", Rows.ROWS_TYPE);
+            new NodeVariable<>("Database", Database.class).transientValue().required()
+                    .describedAs("Can only be wired, never typed — the transient live database handle from "
+                            + "a Database node.");
+    private final NodeVariable<String> sqlInput = new NodeVariable<>("SQL", String.class, true).required()
+            .describedAs("Use ? placeholders and bind the actual values through Params — never concatenate "
+                    + "a value into this text, the same rule SQL Query follows. This node has no "
+                    + "required-WHERE guard: a DELETE or UPDATE with no WHERE runs against every row.");
+    private final NodeVariable<List<?>> paramsInput = new NodeVariable<>("Params", Rows.ROWS_TYPE)
+            .describedAs("A list in the same order as the ?s in SQL, exactly as SQL Query's Params works.");
 
-    private final NodeVariable<Integer> changed = new NodeVariable<>("Changed", Integer.class);
+    private final NodeVariable<Integer> changed = new NodeVariable<>("Changed", Integer.class)
+            .describedAs("0 for a schema-changing statement (ALTER/CREATE) is normal, not a sign nothing "
+                    + "happened.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

@@ -45,12 +45,20 @@ public class GetRecentOrdersNode extends BaseNode implements NodeContentProvider
     static final int DEFAULT_LIMIT = 10;
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
     private final NodeVariable<Integer> limitInput =
-            withDefault(new NodeVariable<>("Limit", Integer.class, true), DEFAULT_LIMIT);
+            withDefault(new NodeVariable<>("Limit", Integer.class, true), DEFAULT_LIMIT)
+                    .describedAs("How many orders to fetch, newest first, capped at 50 — the first page "
+                            + "of history, not the whole of it.");
 
-    private final NodeVariable<List<?>> ordersOutput = new NodeVariable<>("Orders", LIST);
-    private final NodeVariable<List<?>> openOrderIdsOutput = new NodeVariable<>("Open Order IDs", LIST);
+    private final NodeVariable<List<?>> ordersOutput = new NodeVariable<>("Orders", LIST)
+            .describedAs("One map per order, keyed id, symbol, side, state, quantity, filled_quantity, "
+                    + "average_price and the rest.");
+    private final NodeVariable<List<?>> openOrderIdsOutput = new NodeVariable<>("Open Order IDs", LIST)
+            .describedAs("The subset of Orders that hasn't finished yet — meant to feed straight into "
+                    + "Cancel Order.");
     private final NodeVariable<Integer> countOutput = new NodeVariable<>("Count", Integer.class);
     private final NodeVariable<String> latestOrderIdOutput =
             new NodeVariable<>("Latest Order ID", String.class);

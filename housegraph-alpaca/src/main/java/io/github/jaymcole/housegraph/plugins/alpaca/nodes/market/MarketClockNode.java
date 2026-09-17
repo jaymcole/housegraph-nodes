@@ -56,10 +56,17 @@ public class MarketClockNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<AlpacaSession> accountInput =
             new NodeVariable<>("Account", AlpacaSession.class, true).required().transientValue();
 
-    private final NodeVariable<Boolean> isOpenOutput = new NodeVariable<>("Is Open", Boolean.class);
-    private final NodeVariable<String> nextOpenOutput = new NodeVariable<>("Next Open", String.class);
-    private final NodeVariable<String> nextCloseOutput = new NodeVariable<>("Next Close", String.class);
-    private final NodeVariable<String> timestampOutput = new NodeVariable<>("Timestamp", String.class);
+    private final NodeVariable<Boolean> isOpenOutput = new NodeVariable<>("Is Open", Boolean.class)
+            .describedAs("Whether the regular session is live right now. An extended-hours order can "
+                    + "still be placeable while this reads false - see Place Order's Extended Hours "
+                    + "input.");
+    private final NodeVariable<String> nextOpenOutput = new NodeVariable<>("Next Open", String.class)
+            .describedAs("ISO-8601 text, not a typed timestamp - when the market next opens, as "
+                    + "Alpaca reported it.");
+    private final NodeVariable<String> nextCloseOutput = new NodeVariable<>("Next Close", String.class)
+            .describedAs("ISO-8601 text, the same format as Next Open - when the market next closes.");
+    private final NodeVariable<String> timestampOutput = new NodeVariable<>("Timestamp", String.class)
+            .describedAs("ISO-8601 text for the moment this check was made, as Alpaca reported it.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort openOut = new FlowPort("Open", FlowPort.Direction.OUT);

@@ -52,18 +52,29 @@ public class PullModelNode extends BaseNode {
 
     private final NodeVariable<String> modelInput =
             withDefault(new NodeVariable<>("Model", String.class, true), LocalLlmClient.DEFAULT_MODEL)
-                    .required();
+                    .required()
+                    .describedAs("The model to make sure is present. A bare name (llama3.2) matches "
+                            + "any tag loosely; naming a tag (llama3.2:1b) matches exactly.");
     private final NodeVariable<String> serverInput =
             withDefault(new NodeVariable<>("Server", String.class, true), LocalLlmClient.DEFAULT_SERVER)
-                    .required();
+                    .required()
+                    .describedAs("Where Ollama is listening. Ollama only — pointing this at an "
+                            + "OpenAI-compatible server fails rather than appearing to work.");
     private final NodeVariable<String> apiKeyInput =
-            new NodeVariable<>("API Key", String.class, true).markSecret();
+            new NodeVariable<>("API Key", String.class, true).markSecret()
+                    .describedAs("For a server started behind a token. Marked secret, so wire it "
+                            + "from a Secret Loader rather than typing it in.");
     private final NodeVariable<Integer> timeoutInput =
             withDefault(new NodeVariable<>("Timeout (s)", Integer.class, true),
-                    LlmModels.DEFAULT_PULL_TIMEOUT_SECONDS);
+                    LlmModels.DEFAULT_PULL_TIMEOUT_SECONDS)
+                    .describedAs("How long to wait for the pull to finish. Defaults to an hour — a "
+                            + "partial download is not resumed, so a shorter timeout throws away "
+                            + "whatever progress it made.");
 
     private final NodeVariable<String> modelOutput = new NodeVariable<>("Model", String.class);
-    private final NodeVariable<Boolean> downloadedOutput = new NodeVariable<>("Downloaded", Boolean.class);
+    private final NodeVariable<Boolean> downloadedOutput = new NodeVariable<>("Downloaded", Boolean.class)
+            .describedAs("True only when this run actually fetched the model, false when it was "
+                    + "already present. Not the same as \"succeeded\" — Ready fires either way.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort ready = new FlowPort("Ready", FlowPort.Direction.OUT);

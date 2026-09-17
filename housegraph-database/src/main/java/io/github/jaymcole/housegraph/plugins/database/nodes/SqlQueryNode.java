@@ -42,11 +42,18 @@ import java.util.Map;
 public class SqlQueryNode extends BaseNode {
 
     private final NodeVariable<Database> databaseInput =
-            new NodeVariable<>("Database", Database.class).transientValue().required();
-    private final NodeVariable<String> sqlInput = new NodeVariable<>("SQL", String.class, true).required();
-    private final NodeVariable<List<?>> paramsInput = new NodeVariable<>("Params", Rows.ROWS_TYPE);
+            new NodeVariable<>("Database", Database.class).transientValue().required()
+                    .describedAs("Can only be wired, never typed — the transient live database handle from "
+                            + "a Database node.");
+    private final NodeVariable<String> sqlInput = new NodeVariable<>("SQL", String.class, true).required()
+            .describedAs("Use ? placeholders and bind the actual values through Params — never concatenate "
+                    + "a value into this text. A table filled from chat messages or webhook bodies means "
+                    + "concatenation is how someone else's text gets executed instead of stored.");
+    private final NodeVariable<List<?>> paramsInput = new NodeVariable<>("Params", Rows.ROWS_TYPE)
+            .describedAs("A list in the same order as the ?s in SQL.");
 
-    private final NodeVariable<List<?>> rows = new NodeVariable<>("Rows", Rows.ROWS_TYPE);
+    private final NodeVariable<List<?>> rows = new NodeVariable<>("Rows", Rows.ROWS_TYPE)
+            .describedAs("A list of maps, one per row, keyed by column name.");
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
     private final NodeVariable<Boolean> foundValue = new NodeVariable<>("Found", Boolean.class);
 

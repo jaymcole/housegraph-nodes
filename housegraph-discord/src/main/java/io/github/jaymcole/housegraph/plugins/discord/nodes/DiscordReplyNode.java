@@ -37,9 +37,11 @@ import java.util.List;
 @Node.Type("discord.DiscordReplyNode")
 public class DiscordReplyNode extends BaseNode {
 
-    private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue().required();
+    private final NodeVariable<DiscordReply> reply = new NodeVariable<>("Reply", DiscordReply.class).transientValue().required()
+            .describedAs("Must be wired from a Discord Slash Command node's Reply output to answer that invocation.");
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
-    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class)
+            .describedAs("Accepts an image, a file path, or a list of either. Unwired means text-only.");
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 

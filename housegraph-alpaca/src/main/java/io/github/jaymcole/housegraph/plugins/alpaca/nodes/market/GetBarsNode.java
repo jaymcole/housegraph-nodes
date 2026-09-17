@@ -80,14 +80,24 @@ public class GetBarsNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<String> symbolInput =
             new NodeVariable<>("Symbol", String.class, true).required();
     private final NodeVariable<String> timeframeInput = withDefault(
-            new NodeVariable<>("Timeframe", String.class, true), DEFAULT_TIMEFRAME);
+            new NodeVariable<>("Timeframe", String.class, true), DEFAULT_TIMEFRAME)
+                    .describedAs("Alpaca's own spelling: 1Min, 5Min, 15Min, 1Hour, 1Day, 1Week or "
+                            + "1Month.");
     private final NodeVariable<Integer> limitInput =
-            withDefault(new NodeVariable<>("Limit", Integer.class, true), DEFAULT_LIMIT);
+            withDefault(new NodeVariable<>("Limit", Integer.class, true), DEFAULT_LIMIT)
+                    .describedAs("How many bars to return, not a limit price - unrelated to \"Limit\" "
+                            + "meaning a limit order elsewhere in this library.");
     private final NodeVariable<String> feedInput = withDefault(
-            new NodeVariable<>("Feed", String.class, true), AlpacaApi.DEFAULT_FEED);
+            new NodeVariable<>("Feed", String.class, true), AlpacaApi.DEFAULT_FEED)
+                    .describedAs("iex is what every account has; sip needs a market-data subscription "
+                            + "and fails the node without one. Picking the wrong one here means "
+                            + "misleading history, not an obvious error.");
 
-    private final NodeVariable<List<?>> barsOutput = new NodeVariable<>("Bars", LIST);
-    private final NodeVariable<List<?>> closesOutput = new NodeVariable<>("Closes", LIST);
+    private final NodeVariable<List<?>> barsOutput = new NodeVariable<>("Bars", LIST)
+            .describedAs("A list of maps, one per candle, keyed timestamp/open/high/low/close/volume/"
+                    + "trade_count/vwap, oldest first.");
+    private final NodeVariable<List<?>> closesOutput = new NodeVariable<>("Closes", LIST)
+            .describedAs("Closing prices only, in the same oldest-first order as Bars.");
     private final NodeVariable<Integer> countOutput = new NodeVariable<>("Count", Integer.class);
     private final NodeVariable<Double> latestCloseOutput =
             new NodeVariable<>("Latest Close", Double.class);

@@ -48,22 +48,40 @@ import javafx.scene.control.Label;
 public class OrderStatusNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
     private final NodeVariable<String> orderIdInput =
-            new NodeVariable<>("Order ID", String.class, true).required();
+            new NodeVariable<>("Order ID", String.class, true).required()
+                    .describedAs("Wire this from Place Order's Order ID output, or from Get Recent "
+                            + "Orders.");
 
-    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class);
+    private final NodeVariable<String> stateOutput = new NodeVariable<>("State", String.class)
+            .describedAs("The order's state as Robinhood spelled it. A state this library doesn't "
+                    + "recognize is passed through as-is and treated as still running.");
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
-    private final NodeVariable<String> sideOutput = new NodeVariable<>("Side", String.class);
-    private final NodeVariable<Double> quantityOutput = new NodeVariable<>("Quantity", Double.class);
+    private final NodeVariable<String> sideOutput = new NodeVariable<>("Side", String.class)
+            .describedAs("\"buy\" or \"sell\".");
+    private final NodeVariable<Double> quantityOutput = new NodeVariable<>("Quantity", Double.class)
+            .describedAs("Shares ordered, which may be fractional.");
     private final NodeVariable<Double> filledQuantityOutput =
-            new NodeVariable<>("Filled Quantity", Double.class);
+            new NodeVariable<>("Filled Quantity", Double.class)
+                    .describedAs("Shares filled so far — may be less than Quantity while the order is "
+                            + "still working.");
     private final NodeVariable<Double> averagePriceOutput =
-            new NodeVariable<>("Average Price", Double.class);
-    private final NodeVariable<Double> filledValueOutput = new NodeVariable<>("Filled Value", Double.class);
-    private final NodeVariable<Boolean> finishedOutput = new NodeVariable<>("Finished", Boolean.class);
+            new NodeVariable<>("Average Price", Double.class)
+                    .describedAs("Dollars per share, averaged across whatever has filled. Null until "
+                            + "something has.");
+    private final NodeVariable<Double> filledValueOutput = new NodeVariable<>("Filled Value", Double.class)
+            .describedAs("Total dollars filled so far — distinct from an estimate based on the full "
+                    + "Quantity.");
+    private final NodeVariable<Boolean> finishedOutput = new NodeVariable<>("Finished", Boolean.class)
+            .describedAs("True once the order is terminal: filled, cancelled or rejected — not only "
+                    + "\"filled\".");
     private final NodeVariable<String> rejectReasonOutput =
-            new NodeVariable<>("Reject Reason", String.class);
+            new NodeVariable<>("Reject Reason", String.class)
+                    .describedAs("Only populated when Rejected fires. It's the only place that reason "
+                            + "appears.");
     private final NodeVariable<String> summaryOutput = new NodeVariable<>("Summary", String.class);
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);

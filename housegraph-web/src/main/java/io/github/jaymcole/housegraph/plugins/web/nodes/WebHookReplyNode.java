@@ -22,9 +22,14 @@ public class WebHookReplyNode extends BaseNode {
     private static final String DEFAULT_CONTENT_TYPE = "application/json; charset=utf-8";
     private static final int DEFAULT_STATUS = 200;
 
-    private final NodeVariable<WebHookReply> reply = new NodeVariable<>("Reply", WebHookReply.class).transientValue().required();
-    private final NodeVariable<Integer> status = new NodeVariable<>("Status", Integer.class, true);
-    private final NodeVariable<String> contentType = new NodeVariable<>("Content-Type", String.class, true);
+    private final NodeVariable<WebHookReply> reply = new NodeVariable<>("Reply", WebHookReply.class).transientValue().required()
+            .describedAs("Must be wired from a Web Hook Request node's Reply output — ties this send "
+                    + "to that one waiting caller.");
+    private final NodeVariable<Integer> status = new NodeVariable<>("Status", Integer.class, true)
+            .describedAs("The HTTP status code to answer with. Clearing it falls back to 200.");
+    private final NodeVariable<String> contentType = new NodeVariable<>("Content-Type", String.class, true)
+            .describedAs("The response's Content-Type header. Clearing it falls back to "
+                    + "application/json; charset=utf-8.");
     private final NodeVariable<String> body = new NodeVariable<>("Body", String.class, true);
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

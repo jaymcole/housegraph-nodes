@@ -44,11 +44,16 @@ import java.util.regex.Matcher;
 public class RegexMatchNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required();
+    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required()
+            .describedAs("A regular expression. Case-sensitive by default; prefix with (?i) for "
+                    + "insensitive.");
 
     private final NodeVariable<Boolean> matched = new NodeVariable<>("Matched", Boolean.class);
     private final NodeVariable<String> match = new NodeVariable<>("Match", String.class);
-    private final NodeVariable<List<?>> groups = new NodeVariable<>("Groups", Texts.LIST_TYPE);
+    private final NodeVariable<List<?>> groups = new NodeVariable<>("Groups", Texts.LIST_TYPE)
+            .describedAs("The capture groups of the first match, 1-indexed and in order — the whole "
+                    + "match is on Match and is not repeated here. A group that took part in no match "
+                    + "reads as empty text, not null.");
 
     @Override
     public void process(ProcessContext ctx) {

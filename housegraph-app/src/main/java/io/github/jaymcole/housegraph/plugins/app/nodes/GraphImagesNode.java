@@ -82,8 +82,11 @@ public class GraphImagesNode extends BaseNode {
     /** The temporary folder's name, so an interrupted run leaves something recognisable behind. */
     private static final String TEMP_PREFIX = "housegraph-graph-images-";
 
-    private final NodeVariable<String> folder = new NodeVariable<>("Folder", String.class, true);
-    private final NodeVariable<String> baseName = new NodeVariable<>("Base Name", String.class, true);
+    private final NodeVariable<String> folder = new NodeVariable<>("Folder", String.class, true)
+            .describedAs("Where to write the PNGs. Blank draws into a temporary folder that is deleted "
+                    + "afterward, leaving Images as the only copy — set this to keep the files.");
+    private final NodeVariable<String> baseName = new NodeVariable<>("Base Name", String.class, true)
+            .describedAs("The file name each PNG is built from. Blank uses the open graph's own name.");
 
     private final NodeVariable<List<?>> images = new NodeVariable<>("Images", LIST);
 

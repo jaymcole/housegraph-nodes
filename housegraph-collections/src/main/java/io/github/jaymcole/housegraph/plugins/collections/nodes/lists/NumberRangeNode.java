@@ -33,7 +33,9 @@ public class NumberRangeNode extends BaseNode {
 
     private final NodeVariable<Integer> start = new NodeVariable<>("Start", Integer.class, true);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class, true).required();
-    private final NodeVariable<Integer> step = new NodeVariable<>("Step", Integer.class, true);
+    private final NodeVariable<Integer> step = new NodeVariable<>("Step", Integer.class, true)
+            .describedAs("The gap between entries. Negative counts down; a step of 0 is rejected outright "
+                    + "and throws.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
 

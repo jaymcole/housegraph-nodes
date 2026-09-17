@@ -103,19 +103,33 @@ public class WebServerNode extends BaseNode implements NodeContentProvider, Auto
     private final LocalWebServer server = new LocalWebServer();
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Name", String.class, true), DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Name", String.class, true)
+                    .describedAs("Drives both the ResourceRegistry broadcast name and the mDNS "
+                            + "hostname of the served URL."), DEFAULT_NAME);
     private final NodeVariable<String> directoryInput =
-            new NodeVariable<>("Directory", String.class, true).required();
+            new NodeVariable<>("Directory", String.class, true).required()
+                    .describedAs("Where the build command runs — not necessarily the served folder; "
+                            + "see Output Folder.");
     private final NodeVariable<String> outputFolderInput =
-            withDefault(new NodeVariable<>("Output Folder", String.class, true), DEFAULT_OUTPUT_FOLDER);
+            withDefault(new NodeVariable<>("Output Folder", String.class, true)
+                    .describedAs("Subfolder of Directory actually served. Blank serves Directory "
+                            + "itself."), DEFAULT_OUTPUT_FOLDER);
     private final NodeVariable<String> buildCommandInput =
-            withDefault(new NodeVariable<>("Build Command", String.class, true), DEFAULT_BUILD_COMMAND);
+            withDefault(new NodeVariable<>("Build Command", String.class, true)
+                    .describedAs("Shell command run in Directory before serving. Blank opts out of "
+                            + "the build step entirely."), DEFAULT_BUILD_COMMAND);
     private final NodeVariable<Integer> portInput =
-            withDefault(new NodeVariable<>("Port", Integer.class, true), DEFAULT_PORT);
+            withDefault(new NodeVariable<>("Port", Integer.class, true)
+                    .describedAs("1–65535. An invalid or blank value falls back to "
+                            + DEFAULT_PORT + "."), DEFAULT_PORT);
     private final NodeVariable<String> proxyInput =
-            new NodeVariable<>("Proxy Target", String.class, true);
+            new NodeVariable<>("Proxy Target", String.class, true)
+                    .describedAs("Reverse-proxies " + PROXY_PREFIX + "/* to this address. Blank means "
+                            + "no proxy; a bare host:port defaults to http://.");
     private final NodeVariable<JsonDocumentStore> storeInput =
-            new NodeVariable<>("Store", JsonDocumentStore.class);
+            new NodeVariable<>("Store", JsonDocumentStore.class)
+                    .describedAs("Wire a Data Store node's output. Unwired, /api/data answers 503 "
+                            + "while static files keep serving.");
 
     private final FlowPort start = new FlowPort("Start", FlowPort.Direction.IN);
     private final FlowPort stop = new FlowPort("Stop", FlowPort.Direction.IN);

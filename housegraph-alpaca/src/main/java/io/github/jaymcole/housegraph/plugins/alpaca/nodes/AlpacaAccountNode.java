@@ -103,7 +103,8 @@ public class AlpacaAccountNode extends BaseNode implements NodeContentProvider {
     private String registeredName;
 
     private final NodeVariable<String> nameInput =
-            withDefault(new NodeVariable<>("Account Name", String.class, true), DEFAULT_NAME);
+            withDefault(new NodeVariable<>("Account Name", String.class, true), DEFAULT_NAME)
+                    .describedAs("The name AlpacaAccountRefNode elsewhere in the graph matches by.");
     /**
      * Secret, although a key id is not much of one, because of where the value would otherwise end
      * up. A save file records a manually-editable input's <em>current</em> value, and it cannot tell
@@ -113,11 +114,20 @@ public class AlpacaAccountNode extends BaseNode implements NodeContentProvider {
      * which is the one thing fetching it from the store was meant to avoid.
      */
     private final NodeVariable<String> apiKeyInput =
-            new NodeVariable<>("API Key ID", String.class, true).required().markSecret();
+            new NodeVariable<>("API Key ID", String.class, true).required().markSecret()
+                    .describedAs("Wire this from a Secret Loader node. Paper and live accounts use "
+                            + "different key pairs, and a key issued for one does not work against "
+                            + "the other.");
     private final NodeVariable<String> secretKeyInput =
-            new NodeVariable<>("API Secret Key", String.class, true).required().markSecret();
+            new NodeVariable<>("API Secret Key", String.class, true).required().markSecret()
+                    .describedAs("Wired the same way as API Key ID, and paired with it - keep both "
+                            + "from the same paper-or-live key set.");
     private final NodeVariable<Boolean> paperInput =
-            withDefault(new NodeVariable<>("Paper Trading", Boolean.class, true), Boolean.TRUE);
+            withDefault(new NodeVariable<>("Paper Trading", Boolean.class, true), Boolean.TRUE)
+                    .describedAs("The real-money safety switch. True connects to Alpaca's paper "
+                            + "account - fake money, real prices. False connects to the live "
+                            + "brokerage account, where orders spend real money. API Key ID and API "
+                            + "Secret Key must be the pair issued for whichever side this is set to.");
 
     private final NodeVariable<AlpacaSession> accountOutput =
             new NodeVariable<>("Account", AlpacaSession.class).transientValue();

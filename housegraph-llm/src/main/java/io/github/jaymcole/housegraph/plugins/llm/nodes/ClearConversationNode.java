@@ -55,10 +55,19 @@ import java.util.Optional;
 public class ClearConversationNode extends BaseNode {
 
     private final NodeVariable<String> conversation =
-            new NodeVariable<>("Conversation ID", String.class, true).required();
+            new NodeVariable<>("Conversation ID", String.class, true).required()
+                    .describedAs("Must name the same conversation a Local LLM node is using. "
+                            + "Nothing connects the two nodes directly — wiring is by this id, not "
+                            + "by an edge.");
 
-    private final NodeVariable<Integer> forgotten = new NodeVariable<>("Forgotten", Integer.class);
-    private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
+    private final NodeVariable<Integer> forgotten = new NodeVariable<>("Forgotten", Integer.class)
+            .describedAs("How many exchanges were forgotten. 0 is overloaded — it means either "
+                    + "there was nothing to forget, or a conversation existed with 0 exchanges — "
+                    + "read Found alongside it to tell those apart.");
+    private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class)
+            .describedAs("Whether a conversation existed under that name. Also answers a pull for "
+                    + "data with no flow arriving here — reading it never has the side effect of "
+                    + "forgetting anything.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

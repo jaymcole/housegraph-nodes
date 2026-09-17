@@ -57,11 +57,17 @@ public class GetRecentOrdersNode extends BaseNode implements NodeContentProvider
     private final NodeVariable<AlpacaSession> accountInput =
             new NodeVariable<>("Account", AlpacaSession.class, true).required().transientValue();
     private final NodeVariable<Integer> limitInput =
-            withDefault(new NodeVariable<>("Limit", Integer.class, true), DEFAULT_LIMIT);
+            withDefault(new NodeVariable<>("Limit", Integer.class, true), DEFAULT_LIMIT)
+                    .describedAs("How many orders to return, up to Alpaca's cap of 500. Not a limit "
+                            + "price.");
     private final NodeVariable<Boolean> openOnlyInput =
-            withDefault(new NodeVariable<>("Open Only", Boolean.class, true), Boolean.TRUE);
+            withDefault(new NodeVariable<>("Open Only", Boolean.class, true), Boolean.TRUE)
+                    .describedAs("On by default. \"Open\" means still working - queued, partially "
+                            + "filled, pending cancel - as opposed to finished one way or another.");
 
-    private final NodeVariable<List<?>> ordersOutput = new NodeVariable<>("Orders", LIST);
+    private final NodeVariable<List<?>> ordersOutput = new NodeVariable<>("Orders", LIST)
+            .describedAs("A list of maps, one per order, keyed id/symbol/side/status/qty/filled_qty/"
+                    + "filled_avg_price/type/limit_price/stop_price/time_in_force/submitted_at.");
     private final NodeVariable<List<?>> orderIdsOutput = new NodeVariable<>("Order IDs", LIST);
     private final NodeVariable<Integer> countOutput = new NodeVariable<>("Count", Integer.class);
 

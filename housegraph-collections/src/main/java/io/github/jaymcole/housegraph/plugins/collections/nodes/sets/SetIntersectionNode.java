@@ -39,8 +39,11 @@ import java.util.Set;
 @Node.Type("collections.SetIntersectionNode")
 public class SetIntersectionNode extends BaseNode {
 
-    private final NodeVariable<Set<?>> a = new NodeVariable<>("A", Sets.TYPE).required();
-    private final NodeVariable<Set<?>> b = new NodeVariable<>("B", Sets.TYPE).required();
+    private final NodeVariable<Set<?>> a = new NodeVariable<>("A", Sets.TYPE).required()
+            .describedAs("On a tie, A's object and order survive. Both sides are required, unlike "
+                    + "Union/Difference.");
+    private final NodeVariable<Set<?>> b = new NodeVariable<>("B", Sets.TYPE).required()
+            .describedAs("Same operand-role reasoning as A.");
 
     private final NodeVariable<Set<?>> result = new NodeVariable<>("Set", Sets.TYPE);
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);

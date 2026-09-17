@@ -56,13 +56,19 @@ public class GetPositionsNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<AlpacaSession> accountInput =
             new NodeVariable<>("Account", AlpacaSession.class, true).required().transientValue();
 
-    private final NodeVariable<List<?>> positionsOutput = new NodeVariable<>("Positions", LIST);
+    private final NodeVariable<List<?>> positionsOutput = new NodeVariable<>("Positions", LIST)
+            .describedAs("A list of maps, one per holding. unrealized_plpc is a fraction: -0.05 is "
+                    + "down 5%, not down 5.");
     private final NodeVariable<List<?>> symbolsOutput = new NodeVariable<>("Symbols", LIST);
     private final NodeVariable<Integer> countOutput = new NodeVariable<>("Count", Integer.class);
     private final NodeVariable<Double> marketValueOutput =
-            new NodeVariable<>("Market Value", Double.class);
+            new NodeVariable<>("Market Value", Double.class)
+                    .describedAs("0 means a genuinely empty portfolio. Null means Alpaca didn't report "
+                            + "a value for at least one holding.");
     private final NodeVariable<Double> unrealisedProfitOutput =
-            new NodeVariable<>("Unrealised P/L", Double.class);
+            new NodeVariable<>("Unrealised P/L", Double.class)
+                    .describedAs("Summed across every holding. Same 0-versus-null distinction as "
+                            + "Market Value.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

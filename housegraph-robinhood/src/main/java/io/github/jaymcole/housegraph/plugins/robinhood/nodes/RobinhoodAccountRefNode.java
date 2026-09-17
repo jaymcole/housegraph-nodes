@@ -35,14 +35,18 @@ import javafx.scene.control.Label;
 public class RobinhoodAccountRefNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<String> nameInput = withDefault(
-            new NodeVariable<>("Account Name", String.class, true), RobinhoodAccountNode.DEFAULT_NAME);
+            new NodeVariable<>("Account Name", String.class, true), RobinhoodAccountNode.DEFAULT_NAME)
+                    .describedAs("Must match the Account Name of the Robinhood Account node this "
+                            + "points at.");
 
     /**
      * Transient, like the account node's own Account output: a live login is not something a save
      * file can carry. It is re-resolved rather than restored.
      */
     private final NodeVariable<RobinhoodSession> accountOutput =
-            new NodeVariable<>("Account", RobinhoodSession.class).transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class).transientValue()
+                    .describedAs("Null if no Robinhood Account node in the graph currently carries "
+                            + "that name.");
 
     private Label statusLabel;
 

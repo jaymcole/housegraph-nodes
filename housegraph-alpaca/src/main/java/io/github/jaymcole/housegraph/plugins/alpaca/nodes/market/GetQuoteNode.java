@@ -52,21 +52,32 @@ public class GetQuoteNode extends BaseNode implements NodeContentProvider {
     private final NodeVariable<String> symbolInput =
             new NodeVariable<>("Symbol", String.class, true).required();
     private final NodeVariable<String> feedInput = withDefault(
-            new NodeVariable<>("Feed", String.class, true), AlpacaApi.DEFAULT_FEED);
+            new NodeVariable<>("Feed", String.class, true), AlpacaApi.DEFAULT_FEED)
+                    .describedAs("Same iex/sip caveat as Get Bars: iex works on every account, sip "
+                            + "needs a market-data subscription and fails the node without one.");
 
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
-    private final NodeVariable<Double> priceOutput = new NodeVariable<>("Price", Double.class);
+    private final NodeVariable<Double> priceOutput = new NodeVariable<>("Price", Double.class)
+            .describedAs("A synthesized best guess: the last trade when there has been one, else the "
+                    + "bid/ask midpoint, else today's previous close. Not literally \"the\" price "
+                    + "Alpaca reports - read Last Trade, Bid or Ask directly to be exact about which.");
     private final NodeVariable<Double> lastTradeOutput = new NodeVariable<>("Last Trade", Double.class);
-    private final NodeVariable<Double> bidOutput = new NodeVariable<>("Bid", Double.class);
-    private final NodeVariable<Double> askOutput = new NodeVariable<>("Ask", Double.class);
+    private final NodeVariable<Double> bidOutput = new NodeVariable<>("Bid", Double.class)
+            .describedAs("The best price buyers are currently offering for the symbol.");
+    private final NodeVariable<Double> askOutput = new NodeVariable<>("Ask", Double.class)
+            .describedAs("The best price sellers currently want - the opposite side of Bid.");
     private final NodeVariable<Double> previousCloseOutput =
             new NodeVariable<>("Previous Close", Double.class);
-    private final NodeVariable<Double> changeOutput = new NodeVariable<>("Change", Double.class);
+    private final NodeVariable<Double> changeOutput = new NodeVariable<>("Change", Double.class)
+            .describedAs("Dollar change from Previous Close, not a percent - see Change % for that.");
     private final NodeVariable<Double> changePercentOutput =
-            new NodeVariable<>("Change %", Double.class);
+            new NodeVariable<>("Change %", Double.class)
+                    .describedAs("A fraction, not a whole percent: 0.05 means up 5%, not up 0.05%.");
     private final NodeVariable<Double> dayHighOutput = new NodeVariable<>("Day High", Double.class);
     private final NodeVariable<Double> dayLowOutput = new NodeVariable<>("Day Low", Double.class);
-    private final NodeVariable<Double> volumeOutput = new NodeVariable<>("Volume", Double.class);
+    private final NodeVariable<Double> volumeOutput = new NodeVariable<>("Volume", Double.class)
+            .describedAs("Feed-dependent: on the default iex feed this is IEX's own share of trading, "
+                    + "a fraction of the real market's volume, not the whole day's.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

@@ -37,8 +37,11 @@ import java.util.List;
 public class FilterByTextNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> mode = new NodeVariable<>("Mode", String.class, true);
+    private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required()
+            .describedAs("The text to match against. Matching is case-insensitive.");
+    private final NodeVariable<String> mode = new NodeVariable<>("Mode", String.class, true)
+            .describedAs("How Text relates to each entry: contains, not contains, starts with, ends with, "
+                    + "equals or not equals.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> kept = new NodeVariable<>("Kept", Integer.class);

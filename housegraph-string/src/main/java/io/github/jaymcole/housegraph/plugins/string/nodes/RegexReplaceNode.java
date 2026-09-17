@@ -39,8 +39,12 @@ import java.util.regex.Matcher;
 public class RegexReplaceNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required();
-    private final NodeVariable<String> replacement = new NodeVariable<>("Replacement", String.class, true);
+    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required()
+            .describedAs("A regular expression. Case-sensitive by default; prefix with (?i) for "
+                    + "insensitive.");
+    private final NodeVariable<String> replacement = new NodeVariable<>("Replacement", String.class, true)
+            .describedAs("What to put in place of each match. $1 refers to the first capture group, $0 "
+                    + "to the whole match. Blank deletes every match.");
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);
     private final NodeVariable<Integer> replacements = new NodeVariable<>("Replacements", Integer.class);

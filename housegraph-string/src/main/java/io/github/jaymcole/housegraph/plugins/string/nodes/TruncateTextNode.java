@@ -35,7 +35,9 @@ public class TruncateTextNode extends BaseNode {
     private static final int DEFAULT_MAX_LENGTH = 2000;
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<Integer> maxLength = new NodeVariable<>("Max Length", Integer.class, true);
+    private final NodeVariable<Integer> maxLength = new NodeVariable<>("Max Length", Integer.class, true)
+            .describedAs("The longest the result may be, ellipsis included. Pre-filled with 2000, "
+                    + "Discord's per-message limit.");
     private final NodeVariable<String> ellipsis = new NodeVariable<>("Ellipsis", String.class, true);
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);

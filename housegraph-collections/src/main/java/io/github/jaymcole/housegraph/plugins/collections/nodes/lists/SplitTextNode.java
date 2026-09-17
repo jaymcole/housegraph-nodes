@@ -35,7 +35,9 @@ import java.util.List;
 public class SplitTextNode extends BaseNode {
 
     private final NodeVariable<String> text = new NodeVariable<>("Text", String.class, true).required();
-    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true);
+    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true)
+            .describedAs("A literal string, not a regular expression. A blank separator splits into "
+                    + "single characters rather than erroring.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
 

@@ -42,9 +42,16 @@ public class DiscoverCamerasNode extends BaseNode implements NodeContentProvider
     /** Per-request timeout for the authenticated ONVIF enrichment calls. */
     private static final int ENRICH_TIMEOUT_SECONDS = 5;
 
-    private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true);
-    private final NodeVariable<String> username = new NodeVariable<>("Username", String.class, true);
-    private final NodeVariable<String> password = new NodeVariable<>("Password", String.class, true).markSecret();
+    private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true)
+            .describedAs("How long the discovery sweep is given to find cameras. Blank or non-positive "
+                    + "defaults to 4 seconds.");
+    private final NodeVariable<String> username = new NodeVariable<>("Username", String.class, true)
+            .describedAs("Used for the second-pass authenticated ONVIF enrichment of every camera found, "
+                    + "not for logging into one particular camera.");
+    private final NodeVariable<String> password = new NodeVariable<>("Password", String.class, true).markSecret()
+            .describedAs("Secret — wire a Secret Loader into it rather than typing it in. Optional here, "
+                    + "unlike the other camera nodes: a camera whose enrichment fails without one just "
+                    + "keeps its bare discovery values, which is not a failure of the sweep.");
     private final NodeVariable<Integer> camerasFound = new NodeVariable<>("Cameras Found", Integer.class);
     private final NodeVariable<String> configPath = new NodeVariable<>("Config Path", String.class);
     private final FlowPort flowIn = new FlowPort("", FlowPort.Direction.IN);

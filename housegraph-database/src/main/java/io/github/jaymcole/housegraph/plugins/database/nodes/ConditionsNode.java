@@ -39,7 +39,15 @@ abstract class ConditionsNode extends BaseNode {
     private static final int MAXIMUM_CONDITIONS = 16;
 
     protected final NodeVariable<Database> databaseInput =
-            new NodeVariable<>("Database", Database.class).transientValue().required();
+            new NodeVariable<>("Database", Database.class).transientValue().required()
+                    .describedAs("Can only be wired, never typed — the transient live database handle from "
+                            + "a Database node.");
+    /**
+     * Left undescribed here: what an empty or missing table means differs across the three
+     * subclasses (Find reads it as no rows, Delete/Update as nothing to change), so each one
+     * overrides this instance's description in its own {@code configureInputs} rather than share
+     * one sentence that would mislead on at least one of them.
+     */
     protected final NodeVariable<String> tableInput = new NodeVariable<>("Table", String.class, true).required();
 
     private final List<NodeVariable<String>> columns = new ArrayList<>();
@@ -84,8 +92,12 @@ abstract class ConditionsNode extends BaseNode {
         for (int i = columns.size(); i < conditions; i++) {
             int number = i + 1;
             columns.add(new NodeVariable<>("Column " + number, String.class, true));
-            tests.add(new NodeVariable<>("Test " + number, String.class, true));
-            values.add(new NodeVariable<>("Value " + number, Object.class));
+            tests.add(new NodeVariable<>("Test " + number, String.class, true)
+                    .describedAs("=, !=, <, <=, >, >=, contains, starts with, ends with, is empty, is not "
+                            + "empty. Blank defaults to =."));
+            values.add(new NodeVariable<>("Value " + number, Object.class)
+                    .describedAs("Ignored entirely when Test is is empty or is not empty. Comparisons "
+                            + "between text and numbers don't coerce."));
         }
         for (int i = 0; i < conditions; i++) {
             addInput(columns.get(i));

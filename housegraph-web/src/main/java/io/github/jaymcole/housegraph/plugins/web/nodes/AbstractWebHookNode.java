@@ -39,10 +39,12 @@ public abstract class AbstractWebHookNode extends BaseNode implements NodeConten
     protected final NodeVariable<String> path = new NodeVariable<>("Path", String.class);
     @SuppressWarnings("unchecked")
     protected final NodeVariable<Map<String, String>> headers =
-            new NodeVariable<>("Headers", (Class<Map<String, String>>) (Class<?>) Map.class);
+            new NodeVariable<>("Headers", (Class<Map<String, String>>) (Class<?>) Map.class)
+                    .describedAs("All request headers. How a repeated header key resolves is not documented.");
     @SuppressWarnings("unchecked")
     protected final NodeVariable<Map<String, String>> query =
-            new NodeVariable<>("Query", (Class<Map<String, String>>) (Class<?>) Map.class);
+            new NodeVariable<>("Query", (Class<Map<String, String>>) (Class<?>) Map.class)
+                    .describedAs("All query-string parameters. How a repeated query key resolves is not documented.");
     protected final NodeVariable<String> body = new NodeVariable<>("Body", String.class);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 

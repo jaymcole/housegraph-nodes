@@ -39,11 +39,16 @@ import java.util.Map;
 public class CameraMotionStatusNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<String> username = new NodeVariable<>("Username", String.class, true);
-    private final NodeVariable<String> password = new NodeVariable<>("Password", String.class, true).markSecret().required();
-    private final NodeVariable<Integer> channel = new NodeVariable<>("Channel", Integer.class, true);
+    private final NodeVariable<String> password = new NodeVariable<>("Password", String.class, true).markSecret().required()
+            .describedAs("Secret — wire a Secret Loader into it rather than typing it in.");
+    private final NodeVariable<Integer> channel = new NodeVariable<>("Channel", Integer.class, true)
+            .describedAs("Which lens to read, for a multi-lens camera or an NVR's connected channels. "
+                    + "Blank or negative defaults to channel 0.");
 
     private final NodeVariable<Boolean> motion = new NodeVariable<>("motion", Boolean.class);
-    private final NodeVariable<DetectionState> detectionState = new NodeVariable<>("state", DetectionState.class);
+    private final NodeVariable<DetectionState> detectionState = new NodeVariable<>("state", DetectionState.class)
+            .describedAs("The camera's own classification of what it saw: human, vehicle, animal, "
+                    + "motion, or none.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

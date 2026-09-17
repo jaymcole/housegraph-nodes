@@ -36,7 +36,9 @@ import java.util.regex.PatternSyntaxException;
 public class FilterByPatternNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required();
+    private final NodeVariable<String> pattern = new NodeVariable<>("Pattern", String.class, true).required()
+            .describedAs("A regular expression, case-sensitive unless the pattern starts with (?i). It is "
+                    + "searched for anywhere in the entry, not anchored to the whole thing.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> kept = new NodeVariable<>("Kept", Integer.class);

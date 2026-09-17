@@ -40,14 +40,18 @@ import javafx.scene.control.Label;
 public class AlpacaAccountRefNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<String> nameInput = withDefault(
-            new NodeVariable<>("Account Name", String.class, true), AlpacaAccountNode.DEFAULT_NAME);
+            new NodeVariable<>("Account Name", String.class, true), AlpacaAccountNode.DEFAULT_NAME)
+                    .describedAs("Must match the Account Name of an Alpaca Account node elsewhere in "
+                            + "this graph.");
 
     /**
      * Transient, like the account node's own Account output: a live connection is not something a
      * save file can carry. It is re-resolved rather than restored.
      */
     private final NodeVariable<AlpacaSession> accountOutput =
-            new NodeVariable<>("Account", AlpacaSession.class).transientValue();
+            new NodeVariable<>("Account", AlpacaSession.class).transientValue()
+                    .describedAs("Null when Account Name resolves to nothing - this node's one, "
+                            + "silent failure mode.");
     private final NodeVariable<Boolean> paperOutput = new NodeVariable<>("Is Paper", Boolean.class);
 
     private Label statusLabel;

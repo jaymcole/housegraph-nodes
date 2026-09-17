@@ -40,11 +40,15 @@ import java.util.Map;
 @Node.Type("collections.MapFromListsNode")
 public class MapFromListsNode extends BaseNode {
 
-    private final NodeVariable<List<?>> keys = new NodeVariable<>("Keys", Lists.TYPE).required();
-    private final NodeVariable<List<?>> values = new NodeVariable<>("Values", Lists.TYPE).required();
+    private final NodeVariable<List<?>> keys = new NodeVariable<>("Keys", Lists.TYPE).required()
+            .describedAs("Paired by position with Values.");
+    private final NodeVariable<List<?>> values = new NodeVariable<>("Values", Lists.TYPE).required()
+            .describedAs("Paired by position with Keys.");
 
     private final NodeVariable<Map<?, ?>> result = new NodeVariable<>("Map", Maps.TYPE);
-    private final NodeVariable<Integer> dropped = new NodeVariable<>("Dropped", Integer.class);
+    private final NodeVariable<Integer> dropped = new NodeVariable<>("Dropped", Integer.class)
+            .describedAs("The unpaired tail of the longer list plus blank-key or null-value pairs — not "
+                    + "repeated keys that overwrite.");
 
     @Override
     public void process(ProcessContext ctx) {

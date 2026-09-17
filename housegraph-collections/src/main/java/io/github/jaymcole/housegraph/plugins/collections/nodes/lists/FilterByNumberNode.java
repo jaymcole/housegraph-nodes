@@ -32,12 +32,16 @@ import java.util.List;
 public class FilterByNumberNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> comparison = new NodeVariable<>("Comparison", String.class, true);
-    private final NodeVariable<Float> value = new NodeVariable<>("Value", Float.class, true).required();
+    private final NodeVariable<String> comparison = new NodeVariable<>("Comparison", String.class, true)
+            .describedAs("Accepted symbols: >, >=, <, <=, ==, !=.");
+    private final NodeVariable<Float> value = new NodeVariable<>("Value", Float.class, true).required()
+            .describedAs("The threshold Comparison measures the entry against. Defaults to 0.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> kept = new NodeVariable<>("Kept", Integer.class);
-    private final NodeVariable<Integer> skipped = new NodeVariable<>("Skipped", Integer.class);
+    private final NodeVariable<Integer> skipped = new NodeVariable<>("Skipped", Integer.class)
+            .describedAs("Entries that weren't readable as numbers at all — not entries that failed the "
+                    + "comparison.");
 
     public FilterByNumberNode() {
         comparison.setValue(Comparison.GREATER.label);

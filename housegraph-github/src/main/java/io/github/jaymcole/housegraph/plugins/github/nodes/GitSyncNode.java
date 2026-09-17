@@ -33,10 +33,16 @@ import java.nio.file.Path;
 @Node.Type("github.GitSyncNode")
 public class GitSyncNode extends BaseNode {
 
-    private final NodeVariable<String> repositoryUrl = new NodeVariable<>("Repository URL", String.class, true).required();
-    private final NodeVariable<String> localPath = new NodeVariable<>("Local Path", String.class, true).required();
+    private final NodeVariable<String> repositoryUrl = new NodeVariable<>("Repository URL", String.class, true).required()
+            .describedAs("Sync is a hard reset onto this remote's tracking branch, not a merge — there is "
+                    + "no branch choice here.");
+    private final NodeVariable<String> localPath = new NodeVariable<>("Local Path", String.class, true).required()
+            .describedAs("Cloned into if empty. Otherwise hard-reset whenever the remote has moved — any "
+                    + "uncommitted local changes in this folder are destroyed, every sync, with no undo.");
 
-    private final NodeVariable<String> commitId = new NodeVariable<>("Commit", String.class);
+    private final NodeVariable<String> commitId = new NodeVariable<>("Commit", String.class)
+            .describedAs("The full SHA, set on every run whether or not anything changed — check the "
+                    + "Pulled flow-out for \"new\".");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort checked = new FlowPort("Checked", FlowPort.Direction.OUT);

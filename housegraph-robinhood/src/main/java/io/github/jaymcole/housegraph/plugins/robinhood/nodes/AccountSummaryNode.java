@@ -35,15 +35,25 @@ import javafx.scene.control.Label;
 public class AccountSummaryNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
 
     private final NodeVariable<String> accountNumberOutput =
             new NodeVariable<>("Account Number", String.class);
-    private final NodeVariable<Double> buyingPowerOutput = new NodeVariable<>("Buying Power", Double.class);
-    private final NodeVariable<Double> cashOutput = new NodeVariable<>("Cash", Double.class);
-    private final NodeVariable<Double> equityOutput = new NodeVariable<>("Equity", Double.class);
-    private final NodeVariable<Double> marketValueOutput = new NodeVariable<>("Market Value", Double.class);
-    private final NodeVariable<Double> dayChangeOutput = new NodeVariable<>("Day Change", Double.class);
+    private final NodeVariable<Double> buyingPowerOutput = new NodeVariable<>("Buying Power", Double.class)
+            .describedAs("What an order may actually spend, margin included — distinct from Cash, "
+                    + "which is only what is sitting there.");
+    private final NodeVariable<Double> cashOutput = new NodeVariable<>("Cash", Double.class)
+            .describedAs("Cash sitting in the account, no margin included — distinct from Buying Power, "
+                    + "which is what an order may actually spend.");
+    private final NodeVariable<Double> equityOutput = new NodeVariable<>("Equity", Double.class)
+            .describedAs("Cash plus everything held, at current value.");
+    private final NodeVariable<Double> marketValueOutput = new NodeVariable<>("Market Value", Double.class)
+            .describedAs("The value of what is held, not counting cash — distinct from Equity, which "
+                    + "includes it.");
+    private final NodeVariable<Double> dayChangeOutput = new NodeVariable<>("Day Change", Double.class)
+            .describedAs("Dollars, not a percent. Positive means the account is up today.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

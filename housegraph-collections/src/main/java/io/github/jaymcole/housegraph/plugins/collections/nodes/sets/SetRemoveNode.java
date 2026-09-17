@@ -30,7 +30,9 @@ import java.util.Set;
 public class SetRemoveNode extends BaseNode {
 
     private final NodeVariable<Set<?>> set = new NodeVariable<>("Set", Sets.TYPE).required();
-    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required();
+    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required()
+            .describedAs("Matched by text form — a typed \"3\" removes a member that arrived as the "
+                    + "number 3.");
 
     private final NodeVariable<Set<?>> result = new NodeVariable<>("Set", Sets.TYPE);
     private final NodeVariable<Boolean> removed = new NodeVariable<>("Removed", Boolean.class);

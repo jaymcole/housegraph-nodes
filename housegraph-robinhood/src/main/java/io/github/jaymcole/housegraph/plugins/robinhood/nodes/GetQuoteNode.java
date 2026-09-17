@@ -36,21 +36,33 @@ import javafx.scene.control.Label;
 public class GetQuoteNode extends BaseNode implements NodeContentProvider {
 
     private final NodeVariable<RobinhoodSession> accountInput =
-            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue();
+            new NodeVariable<>("Account", RobinhoodSession.class, true).required().transientValue()
+                    .describedAs("Wire this from a Robinhood Account node's Account output, or a "
+                            + "Robinhood Account Ref node pointing at one.");
     private final NodeVariable<String> symbolInput =
             new NodeVariable<>("Symbol", String.class, true).required();
 
     private final NodeVariable<String> symbolOutput = new NodeVariable<>("Symbol", String.class);
-    private final NodeVariable<Double> priceOutput = new NodeVariable<>("Price", Double.class);
-    private final NodeVariable<Double> lastTradeOutput = new NodeVariable<>("Last Trade", Double.class);
+    private final NodeVariable<Double> priceOutput = new NodeVariable<>("Price", Double.class)
+            .describedAs("The last regular-session trade during market hours, or the extended-hours "
+                    + "price outside them — whichever is current.");
+    private final NodeVariable<Double> lastTradeOutput = new NodeVariable<>("Last Trade", Double.class)
+            .describedAs("The last regular-session trade only. It stops updating outside market hours — "
+                    + "contrast with Price, which switches to Extended Hours Price then.");
     private final NodeVariable<Double> extendedOutput =
-            new NodeVariable<>("Extended Hours Price", Double.class);
-    private final NodeVariable<Double> bidOutput = new NodeVariable<>("Bid", Double.class);
-    private final NodeVariable<Double> askOutput = new NodeVariable<>("Ask", Double.class);
+            new NodeVariable<>("Extended Hours Price", Double.class)
+                    .describedAs("The current extended-hours trade price.");
+    private final NodeVariable<Double> bidOutput = new NodeVariable<>("Bid", Double.class)
+            .describedAs("The highest price a buyer is currently offering.");
+    private final NodeVariable<Double> askOutput = new NodeVariable<>("Ask", Double.class)
+            .describedAs("The lowest price a seller is currently asking.");
     private final NodeVariable<Double> previousCloseOutput =
             new NodeVariable<>("Previous Close", Double.class);
-    private final NodeVariable<Double> changeOutput = new NodeVariable<>("Change", Double.class);
-    private final NodeVariable<Boolean> haltedOutput = new NodeVariable<>("Halted", Boolean.class);
+    private final NodeVariable<Double> changeOutput = new NodeVariable<>("Change", Double.class)
+            .describedAs("Dollars, not a percent — the change from Previous Close.");
+    private final NodeVariable<Boolean> haltedOutput = new NodeVariable<>("Halted", Boolean.class)
+            .describedAs("A halted symbol still accepts an order; it just sits unfilled until trading "
+                    + "resumes. Worth checking before acting on a quote.");
 
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);

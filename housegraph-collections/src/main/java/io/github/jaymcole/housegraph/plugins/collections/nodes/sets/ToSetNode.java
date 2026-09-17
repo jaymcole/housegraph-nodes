@@ -40,7 +40,9 @@ public class ToSetNode extends BaseNode {
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
 
     private final NodeVariable<Set<?>> result = new NodeVariable<>("Set", Sets.TYPE);
-    private final NodeVariable<Integer> removed = new NodeVariable<>("Removed", Integer.class);
+    private final NodeVariable<Integer> removed = new NodeVariable<>("Removed", Integer.class)
+            .describedAs("The count of duplicate entries dropped during dedup — not an element-removal "
+                    + "action.");
 
     @Override
     public void process(ProcessContext ctx) {

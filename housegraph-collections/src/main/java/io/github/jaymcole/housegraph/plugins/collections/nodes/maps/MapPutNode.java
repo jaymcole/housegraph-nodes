@@ -33,11 +33,15 @@ import java.util.Map;
 public class MapPutNode extends BaseNode {
 
     private final NodeVariable<Map<?, ?>> map = new NodeVariable<>("Map", Maps.TYPE);
-    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true).required();
-    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class).required();
+    private final NodeVariable<String> key = new NodeVariable<>("Key", String.class, true).required()
+            .describedAs("A blank key silently does nothing.");
+    private final NodeVariable<Object> value = new NodeVariable<>("Value", Object.class).required()
+            .describedAs("Accepts any type. Overwrites the existing entry under a matching key.");
 
     private final NodeVariable<Map<?, ?>> result = new NodeVariable<>("Map", Maps.TYPE);
-    private final NodeVariable<Boolean> replaced = new NodeVariable<>("Replaced", Boolean.class);
+    private final NodeVariable<Boolean> replaced = new NodeVariable<>("Replaced", Boolean.class)
+            .describedAs("True only when an existing key's value was overwritten — not that the map "
+                    + "object changed.");
 
     @Override
     public void process(ProcessContext ctx) {

@@ -33,7 +33,8 @@ import java.util.List;
 public class ListContainsNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required();
+    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required()
+            .describedAs("Text-typed, matched with a forgiving equals-or-same-text comparison.");
 
     private final NodeVariable<Boolean> found = new NodeVariable<>("Found", Boolean.class);
     private final NodeVariable<Integer> occurrences = new NodeVariable<>("Occurrences", Integer.class);

@@ -37,7 +37,10 @@ import java.util.StringJoiner;
 public class JoinTextNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Texts.LIST_TYPE).required();
-    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true);
+    private final NodeVariable<String> separator = new NodeVariable<>("Separator", String.class, true)
+            .describedAs("Placed between each entry. Understands the escapes \\n, \\t, \\r and \\\\, so "
+                    + "a real newline or backslash can be typed into a single-line field. Pre-filled "
+                    + "with \", \".");
 
     private final NodeVariable<String> result = new NodeVariable<>("Result", String.class);
 

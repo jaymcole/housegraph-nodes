@@ -50,10 +50,13 @@ import java.util.Map;
 @Node.Type("database.FindRowsNode")
 public class FindRowsNode extends ConditionsNode {
 
-    private final NodeVariable<String> sortInput = new NodeVariable<>("Sort", String.class, true);
-    private final NodeVariable<Integer> limitInput = new NodeVariable<>("Limit", Integer.class, true);
+    private final NodeVariable<String> sortInput = new NodeVariable<>("Sort", String.class, true)
+            .describedAs("A bare column name, optionally followed by desc, e.g. \"created_at desc\".");
+    private final NodeVariable<Integer> limitInput = new NodeVariable<>("Limit", Integer.class, true)
+            .describedAs("0 means no limit — every matching row — not zero rows.");
 
-    private final NodeVariable<List<?>> rows = new NodeVariable<>("Rows", Rows.ROWS_TYPE);
+    private final NodeVariable<List<?>> rows = new NodeVariable<>("Rows", Rows.ROWS_TYPE)
+            .describedAs("A list of maps, one per row, keyed by column name.");
     private final NodeVariable<Integer> count = new NodeVariable<>("Count", Integer.class);
     private final NodeVariable<Boolean> foundValue = new NodeVariable<>("Found", Boolean.class);
 
@@ -79,6 +82,8 @@ public class FindRowsNode extends ConditionsNode {
     @Override
     public void configureInputs() {
         addInput(databaseInput);
+        tableInput.describedAs("No conditions reads the whole table; a missing table reads as no rows, "
+                + "not an error.");
         addInput(tableInput);
         addConditionInputs();
         addInput(sortInput);

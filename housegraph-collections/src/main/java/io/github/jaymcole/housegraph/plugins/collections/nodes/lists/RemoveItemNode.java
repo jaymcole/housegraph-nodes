@@ -28,7 +28,9 @@ import java.util.List;
 public class RemoveItemNode extends BaseNode {
 
     private final NodeVariable<List<?>> list = new NodeVariable<>("List", Lists.TYPE).required();
-    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required();
+    private final NodeVariable<String> item = new NodeVariable<>("Item", String.class, true).required()
+            .describedAs("Text-typed lookup value, matched with a forgiving comparison. Every matching "
+                    + "copy is removed.");
 
     private final NodeVariable<List<?>> result = new NodeVariable<>("List", Lists.TYPE);
     private final NodeVariable<Integer> removed = new NodeVariable<>("Removed", Integer.class);

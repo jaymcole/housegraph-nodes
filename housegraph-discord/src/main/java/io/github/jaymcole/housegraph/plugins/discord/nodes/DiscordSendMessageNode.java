@@ -50,10 +50,13 @@ public class DiscordSendMessageNode extends BaseNode {
 
     private static final Logger log = Log.get(DiscordSendMessageNode.class);
 
-    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required();
+    private final NodeVariable<DiscordBot> botInput = new NodeVariable<>("Bot", DiscordBot.class).transientValue().required()
+            .describedAs("Wire a Discord Bot (or Discord Bot Ref) node's Bot output.");
     private final NodeVariable<String> message = new NodeVariable<>("Message", String.class, true).required();
-    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required();
-    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class);
+    private final NodeVariable<String> channel = new NodeVariable<>("Channel", String.class, true).required()
+            .describedAs("The numeric channel ID, not a channel name.");
+    private final NodeVariable<Object> attachments = new NodeVariable<>("Attachments", Object.class)
+            .describedAs("Accepts an image, a file path, or a list of either. Unwired means text-only.");
     private final FlowPort in = new FlowPort("", FlowPort.Direction.IN);
     private final FlowPort out = new FlowPort("", FlowPort.Direction.OUT);
 
