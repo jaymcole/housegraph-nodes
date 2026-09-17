@@ -15,7 +15,8 @@ import java.util.Map;
  * Stores Key/Value in the named collection and republishes it — the accumulating half of the pair
  * with {@link ClearMapNode}, and the map twin of {@code AddToCollectionNode} in the {@code lists}
  * package. Wire the loop's Body into this node's flow-in and whatever the body computed into Key
- * and Value; whoever needs the finished map reads it back under the same Name.
+ * and Value; whoever needs the finished map reads it back under the same Name with
+ * {@link GetNamedMapNode}.
  * <p>
  * <b>This replaces the single {@code CollectEntriesNode}, which had a Put port and a Clear port on
  * one node.</b> See {@code AddToCollectionNode}'s class documentation for why that pairing is a
@@ -29,7 +30,10 @@ import java.util.Map;
  * nothing</b>: a null or blank Key, or a null Value, leaves the map unchanged (see {@link Maps#put}).
  * <p>
  * <b>Being pulled for data adds nothing.</b> A downstream node resolving Map or Count without any
- * flow arriving here republishes the current contents and stops.
+ * flow arriving here republishes the current contents and stops. <b>Don't read the map that way
+ * anyway</b> — a pull earlier in the same run than the flow arrival completes this node, so the
+ * flow that follows finds it already done and the put is silently skipped. Read it through
+ * {@link GetNamedMapNode}, which has no such hazard; see its documentation for the detail.
  * <p>
  * <b>The collection is deliberately memory-only and outlives this node</b> — see
  * {@link NamedMaps} and {@code AddToCollectionNode}'s equivalent note.

@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The backing store {@link PutInMapNode} and {@link ClearMapNode} share: a map addressed by name
+ * The backing store {@link PutInMapNode}, {@link ClearMapNode} and {@link GetNamedMapNode} share: a map addressed by name
  * rather than by node identity. See {@code NamedCollections} in the {@code lists} package, whose
  * design this mirrors exactly — a name's map is created empty on first use, keys are namespaced
  * under {@code collections.map:} so a name here can never collide with an unrelated resource (or
