@@ -198,27 +198,89 @@ public class LocalLlmPromptNode extends BaseNode {
      */
     public static final int DEFAULT_UPDATE_EVERY_MILLIS = 0;
 
-    private final NodeVariable<String> prompt = new NodeVariable<>("Prompt", String.class, true).required();
-    private final NodeVariable<String> system = new NodeVariable<>("System Prompt", String.class, true);
-    private final NodeVariable<String> conversation = new NodeVariable<>("Conversation ID", String.class, true);
-    private final NodeVariable<Integer> historyTurns = new NodeVariable<>("History Turns", Integer.class, true);
-    private final NodeVariable<Integer> forgetAfter = new NodeVariable<>("Forget After (min)", Integer.class, true);
-    private final NodeVariable<String> model = new NodeVariable<>("Model", String.class, true).required();
-    private final NodeVariable<String> server = new NodeVariable<>("Server", String.class, true).required();
-    private final NodeVariable<String> api = new NodeVariable<>("API", String.class, true);
-    private final NodeVariable<Float> temperature = new NodeVariable<>("Temperature", Float.class, true);
-    private final NodeVariable<Integer> contextTokens = new NodeVariable<>("Context (tokens)", Integer.class, true);
-    private final NodeVariable<String> think = new NodeVariable<>("Think", String.class, true);
-    private final NodeVariable<Integer> updateEvery = new NodeVariable<>("Update Every (ms)", Integer.class, true);
-    private final NodeVariable<String> apiKey = new NodeVariable<>("API Key", String.class, true).markSecret();
-    private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true);
+    private final NodeVariable<String> prompt = new NodeVariable<>("Prompt", String.class, true)
+            .required()
+            .describedAs("The question to ask, this run. Everything else on the node is about which "
+                    + "model, where, and how patient to be.");
+    private final NodeVariable<String> system = new NodeVariable<>("System Prompt", String.class, true)
+            .describedAs("The standing instruction the model is given before the prompt — \"answer in "
+                    + "one sentence\", \"you are a doorbell\". Reach for this when the answers are the "
+                    + "right idea in the wrong shape.");
+    private final NodeVariable<String> conversation = new NodeVariable<>("Conversation ID", String.class, true)
+            .describedAs("A name for the conversation to remember this exchange under. Blank — the "
+                    + "default — means every run is turn one, and deliberately does not mean one shared "
+                    + "conversation for everybody. Any node naming the same id shares that history, so "
+                    + "a per-person id gives each person their own.");
+    private final NodeVariable<Integer> historyTurns = new NodeVariable<>("History Turns", Integer.class, true)
+            .describedAs("How many previous exchanges are re-sent and kept, oldest dropped first. A "
+                    + "rough stand-in for the context window, which is measured in tokens this node "
+                    + "cannot count — a long history against a small model still fails at the server. "
+                    + "Does nothing without a Conversation ID.");
+    private final NodeVariable<Integer> forgetAfter = new NodeVariable<>("Forget After (min)", Integer.class, true)
+            .describedAs("Minutes of silence after which a conversation is dropped. 0 keeps it for as "
+                    + "long as HouseGraph runs, leaving a Clear Conversation node the only thing that "
+                    + "ends it. Nothing survives a restart either way.");
+    private final NodeVariable<String> model = new NodeVariable<>("Model", String.class, true)
+            .required()
+            .describedAs("The model to ask for, named the way the server names it (" + LocalLlmClient.DEFAULT_MODEL
+                    + ", mistral, qwen2.5:14b). It must already be pulled — this node does not fetch one.");
+    private final NodeVariable<String> server = new NodeVariable<>("Server", String.class, true)
+            .required()
+            .describedAs("Where the model is listening. " + LocalLlmClient.DEFAULT_SERVER + " is Ollama on "
+                    + "this machine. Nothing leaves the machine unless you point this somewhere else, and "
+                    + "a remote address sends the prompt there in the clear over http://.");
+    private final NodeVariable<String> api = new NodeVariable<>("API", String.class, true)
+            .describedAs("Which protocol the server speaks: ollama, or openai for anything serving "
+                    + "/v1/chat/completions — llama.cpp's server, LM Studio, vLLM, LocalAI. Naming the "
+                    + "server works too (\"lm studio\" selects openai). Blank means ollama.");
+    private final NodeVariable<Float> temperature = new NodeVariable<>("Temperature", Float.class, true)
+            .describedAs("How much the model is allowed to wander. 0 is the most repeatable and literal; "
+                    + "around 0.7–1 is conversational; far above 1 most models turn to noise. Blank — the "
+                    + "default — sends nothing at all and leaves the server's own setting alone.");
+    private final NodeVariable<Integer> contextTokens = new NodeVariable<>("Context (tokens)", Integer.class, true)
+            .describedAs("How much the model is allowed to keep in view. Reach for it when a conversation "
+                    + "answers worse the longer it gets: Ollama silently drops the oldest tokens past its "
+                    + "default window, taking the system prompt with them. Costs memory, so raise it to "
+                    + "what the conversation needs, not to the model's maximum. Blank keeps the server's "
+                    + "default. Ollama only.");
+    private final NodeVariable<String> think = new NodeVariable<>("Think", String.class, true)
+            .describedAs("Turns a thinking model's reasoning on: true, false, or a level (low, medium, "
+                    + "high). Blank — the default — sends nothing, which matters: Ollama answers HTTP 400 "
+                    + "for a model that cannot think. Ollama only, though Thinking still fills from any "
+                    + "server that streams reasoning of its own accord.");
+    private final NodeVariable<Integer> updateEvery = new NodeVariable<>("Update Every (ms)", Integer.class, true)
+            .describedAs("How often the Update flow-out fires while the answer is still being written. "
+                    + "0 — the default — is silence until the whole answer is in, and is what an unwired "
+                    + "Update port should cost. 1000 is a sensible first value; below a few hundred you "
+                    + "are mostly measuring whatever the Update branch does.");
+    private final NodeVariable<String> apiKey = new NodeVariable<>("API Key", String.class, true)
+            .markSecret()
+            .describedAs("Empty for a normal local server. It exists for one started behind a token "
+                    + "(llama.cpp's --api-key). Wire a Secret Loader into it rather than typing it in.");
+    private final NodeVariable<Integer> timeout = new NodeVariable<>("Timeout (s)", Integer.class, true)
+            .describedAs("How long to wait for the whole answer, not for each token. The first prompt of "
+                    + "the day is the slow one — a model that is not resident is loaded from disk when it "
+                    + "is first asked, so allow minutes where later runs take seconds.");
 
-    private final NodeVariable<String> response = new NodeVariable<>("Response", String.class);
-    private final NodeVariable<String> thinking = new NodeVariable<>("Thinking", String.class);
-    private final NodeVariable<String> answerSoFar = new NodeVariable<>("Answer So Far", String.class);
-    private final NodeVariable<String> newText = new NodeVariable<>("New Text", String.class);
-    private final NodeVariable<String> phase = new NodeVariable<>("Phase", String.class);
-    private final NodeVariable<Integer> turns = new NodeVariable<>("Turns", Integer.class);
+    private final NodeVariable<String> response = new NodeVariable<>("Response", String.class)
+            .describedAs("The finished answer. Empty on an Update firing, because a run that has not "
+                    + "finished has no answer — read Answer So Far there instead.");
+    private final NodeVariable<String> thinking = new NodeVariable<>("Thinking", String.class)
+            .describedAs("The model's reasoning, where it produced any. Empty for a model that does not "
+                    + "think, or one whose server does not send it.");
+    private final NodeVariable<String> answerSoFar = new NodeVariable<>("Answer So Far", String.class)
+            .describedAs("Everything answered up to this Update — the one to wire where a whole message "
+                    + "is replaced each time, such as an edit to a Discord reply.");
+    private final NodeVariable<String> newText = new NodeVariable<>("New Text", String.class)
+            .describedAs("Only what arrived since the last Update — the one to wire somewhere that "
+                    + "appends rather than replaces.");
+    private final NodeVariable<String> phase = new NodeVariable<>("Phase", String.class)
+            .describedAs("What the model is producing right now: thinking, then answering, and done on "
+                    + "the final firing. A model that cannot think is answering from its first update, so "
+                    + "a graph needs no special case for one.");
+    private final NodeVariable<Integer> turns = new NodeVariable<>("Turns", Integer.class)
+            .describedAs("How many exchanges the conversation holds after this run. 0 when no "
+                    + "Conversation ID is named.");
 
     /**
      * <b>Named, though it is the only flow-in again.</b> The convention for a single-purpose
