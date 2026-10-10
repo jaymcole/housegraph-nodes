@@ -12,7 +12,7 @@ they just share a build and a release.
 | `housegraph-web` | Web Server, Node Server, Web Hook, Web Hook Request, Web Hook Reply | jmdns |
 | `housegraph-ml` | Animal Classifier | Deep Java Library (PyTorch) |
 | `housegraph-github` | Git Sync | JGit |
-| `housegraph-experimental` | Lightbulb | nothing |
+| `housegraph-experimental` | Lightbulb<br>**poop:** Poop Stats, Poop Leaderboard | nothing |
 | `housegraph-filesystem` | Create Folder | nothing |
 | `housegraph-schedule` | Daily Trigger | nothing |
 | `housegraph-collections` | **lists:** Split Text, Build List, Number Range, List Count, Get Item, List Contains, Index Of, Join List, Slice List, Reverse List, Sort List, Distinct, Concat Lists, Append Item, Remove Item, Flatten, Shuffle, Random Item, Filter by Text, Filter by Pattern, Filter by Number, Format Each, List Statistics, Collect Items<br>**maps:** Build Map, Map Get, Map Put, Map Remove, Map Entries, Map from Lists, Merge Maps, Join Map, Tally, Collect Entries<br>**sets:** To Set, Set to List, Set Contains, Set Add, Set Remove, Set Union, Set Intersection, Set Difference | nothing |
